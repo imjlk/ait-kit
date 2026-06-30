@@ -1,0 +1,21 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "ait-kit-pages-gateway",
+  "compatibility_date": "2026-06-30",
+  "pages_build_output_dir": "./dist",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  },
+  "vars": {
+    "APP_ENV": "local"
+  },
+  "services": [
+    {
+      "binding": "APPS_IN_TOSS_API",
+      "service": "ait-kit-toss-api-service",
+      "entrypoint": "AppsInTossApiService"
+    }
+  ]
+}
+

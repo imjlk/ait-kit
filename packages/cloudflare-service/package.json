@@ -1,0 +1,25 @@
+{
+  "name": "@ait-kit/api-cloudflare-service",
+  "version": "0.1.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "deploy:dry-run": "wrangler deploy --dry-run --outdir .wrangler/dry-run"
+  },
+  "dependencies": {
+    "@ait-kit/api-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260630.1",
+    "typescript": "6.0.3",
+    "wrangler": "4.105.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
+

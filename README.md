@@ -1,0 +1,59 @@
+# AIT Kit
+
+Reusable Apps in Toss API building blocks for Cloudflare and backend adapters.
+
+This repository starts with the runtime-neutral Toss API core, a Cloudflare
+Service Binding provider, and a Pages Advanced Mode gateway example. The package
+scope is `@ait-kit`.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  app["Mini app or browser"] --> pages["Cloudflare Pages Advanced Mode gateway"]
+  pages -->|"Service Binding RPC"| service["Apps in Toss API Service Worker"]
+  service -->|"TOSS_CERT.fetch mTLS"| toss["Toss Partner API"]
+```
+
+Pages is the public gateway. It can host static assets, public oRPC handlers,
+session logic, and application business logic. The Apps in Toss API Worker is an
+internal RPC provider. Its `fetch` handler is only a smoke/debug compatibility
+fallback.
+
+## Packages
+
+- `@ait-kit/api-core`: runtime-neutral Toss API core, request/response
+  normalization, and the low-level `MtlsClient` port.
+- `@ait-kit/api-orpc`: public oRPC contract helpers for a Pages gateway.
+- `@ait-kit/api-cloudflare-service`: Cloudflare `WorkerEntrypoint` service that
+  exposes typed Service Binding RPC methods backed by `TOSS_CERT.fetch`.
+
+## Examples And Templates
+
+- `examples/cloudflare-pages-gateway-advanced`: Pages Advanced Mode gateway that
+  calls the Toss API Worker through RPC service binding methods.
+- `templates/cloudflare-toss-api-service`: deployable Toss API Service Worker
+  template. This is where the Deploy to Cloudflare badge belongs.
+
+## Local Checks
+
+```bash
+bun install
+bun run check
+```
+
+Forward mode uses Cloudflare mTLS bindings. Upload a certificate with Wrangler
+and then add an `mtls_certificates` binding named `TOSS_CERT` to the service
+Worker config. The template defaults to stub mode so it can be deployed before
+certificate material is configured.
+
+## TrailBase Kit Reuse
+
+`trailbase-apps-in-toss-kit` can later depend on these packages directly instead
+of carrying an internal copy of the Toss mTLS core. The intended migration is:
+
+1. Publish `@ait-kit/api-core` and `@ait-kit/api-cloudflare-service`.
+2. Keep the existing TrailBase Bun proxy behavior stable.
+3. Replace its internal core import with `@ait-kit/api-core`.
+4. Keep certificates mounted only in the proxy or Cloudflare Worker runtime.
+

@@ -1,0 +1,21 @@
+{
+  "name": "cloudflare-toss-api-service-template",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "deploy:dry-run": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@ait-kit/api-cloudflare-service": "workspace:*",
+    "@ait-kit/api-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260630.1",
+    "typescript": "6.0.3",
+    "wrangler": "4.105.0"
+  }
+}
+

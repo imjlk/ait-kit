@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@ait-kit/api-core": ["packages/api-core/src/index.ts"],
+      "@ait-kit/api-orpc": ["packages/api-orpc/src/index.ts"],
+      "@ait-kit/api-cloudflare-service": ["packages/cloudflare-service/src/index.ts"]
+    }
+  }
+}
