@@ -51,9 +51,11 @@ Public npm packages are managed by Sampo:
 - `@ait-kit/api-cloudflare-service`
 
 Use `sampo add` for user-facing changes, then let the GitHub release workflow
-prepare release PRs and publish merged releases. npm Trusted Publishing should
-be configured for `.github/workflows/release.yml`. Install Sampo's GitHub App
-for PR changeset reminders: https://github.com/apps/sampo-s-bot.
+prepare release PRs. Publishing is handled by `.github/workflows/publish.yml`
+and `scripts/publish-oidc.sh`, which use Bun for builds and npm CLI for OIDC
+Trusted Publishing. Configure npm Trusted Publishing for
+`.github/workflows/publish.yml`, and install Sampo's GitHub App for PR changeset
+reminders: https://github.com/apps/sampo-s-bot.
 
 Forward mode uses Cloudflare mTLS bindings. Upload a certificate with Wrangler
 and then add an `mtls_certificates` binding named `TOSS_CERT` to the service
