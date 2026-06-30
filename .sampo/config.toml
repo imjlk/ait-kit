@@ -1,0 +1,25 @@
+# Sampo configuration
+version = 1
+
+[git]
+default_branch = "main"
+
+[github]
+# By default, Sampo tries to infer the repository from the git remote.
+# You can override or clarify it here if needed.
+repository = "imjlk/ait-kit"
+
+[changesets]
+tags = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"]
+
+[changelog]
+# Options for release notes generation.
+show_commit_hash = true
+show_acknowledgments = true
+show_release_date = true
+release_date_timezone = "Asia/Seoul"
+
+[packages]
+# Options for package discovery and filtering.
+ignore_unpublished = true
+ignore = ["examples/*", "templates/*"]

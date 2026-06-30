@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "cd packages/api-core && bun run typecheck && cd ../api-orpc && bun run typecheck && cd ../cloudflare-service && bun run typecheck && cd ../../templates/cloudflare-toss-api-service && bun run typecheck && cd ../../examples/cloudflare-pages-gateway-advanced && bun run typecheck",
     "test": "bun test packages/api-core/test",
-    "build": "cd examples/cloudflare-pages-gateway-advanced && bun run build",
+    "build": "cd packages/api-core && bun run build && cd ../api-orpc && bun run build && cd ../cloudflare-service && bun run build && cd ../../examples/cloudflare-pages-gateway-advanced && bun run build",
     "deploy:dry-run": "cd packages/cloudflare-service && bun run deploy:dry-run && cd ../../templates/cloudflare-toss-api-service && bun run deploy:dry-run",
     "check": "bun run typecheck && bun run test && bun run build && bun run deploy:dry-run"
   },

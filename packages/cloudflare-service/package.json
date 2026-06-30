@@ -3,15 +3,24 @@
   "version": "0.1.0",
   "type": "module",
   "sideEffects": false,
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && bun build src/index.ts --outfile dist/index.js --format esm --target browser --packages external --external cloudflare:workers",
+    "prepack": "bun run build",
     "deploy:dry-run": "wrangler deploy --dry-run --outdir .wrangler/dry-run"
   },
   "dependencies": {
-    "@ait-kit/api-core": "workspace:*"
+    "@ait-kit/api-core": "0.1.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260630.1",
@@ -22,4 +31,3 @@
     "access": "public"
   }
 }
-

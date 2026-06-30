@@ -42,6 +42,19 @@ bun install
 bun run check
 ```
 
+## Releases
+
+Public npm packages are managed by Sampo:
+
+- `@ait-kit/api-core`
+- `@ait-kit/api-orpc`
+- `@ait-kit/api-cloudflare-service`
+
+Use `sampo add` for user-facing changes, then let the GitHub release workflow
+prepare release PRs and publish merged releases. npm Trusted Publishing should
+be configured for `.github/workflows/release.yml`. Install Sampo's GitHub App
+for PR changeset reminders: https://github.com/apps/sampo-s-bot.
+
 Forward mode uses Cloudflare mTLS bindings. Upload a certificate with Wrangler
 and then add an `mtls_certificates` binding named `TOSS_CERT` to the service
 Worker config. The template defaults to stub mode so it can be deployed before
@@ -56,4 +69,3 @@ of carrying an internal copy of the Toss mTLS core. The intended migration is:
 2. Keep the existing TrailBase Bun proxy behavior stable.
 3. Replace its internal core import with `@ait-kit/api-core`.
 4. Keep certificates mounted only in the proxy or Cloudflare Worker runtime.
-

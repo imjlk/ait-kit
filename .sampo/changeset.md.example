@@ -1,0 +1,7 @@
+---
+npm/@ait-kit/api-core: patch
+npm/@ait-kit/api-orpc: patch
+npm/@ait-kit/api-cloudflare-service: patch
+---
+
+A helpful description of the change, to be read by your users.
