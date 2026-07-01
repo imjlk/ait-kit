@@ -240,10 +240,18 @@ function bearerTokenValue(value: unknown) {
 }
 
 function hasTopLevelUpstreamError(value: unknown) {
-  if (!value || typeof value !== "object" || !Object.hasOwn(value, "error")) {
+  if (!value || typeof value !== "object") {
     return false;
   }
-  const error = (value as Record<string, unknown>).error;
+  const object = value as Record<string, unknown>;
+  const errorCode = stringOrUndefined(object.errorCode);
+  if (errorCode) {
+    return true;
+  }
+  if (!Object.hasOwn(object, "error")) {
+    return false;
+  }
+  const error = object.error;
   if (error === undefined || error === null || error === "") {
     return false;
   }
@@ -265,4 +273,3 @@ function redactSensitiveValues(value: unknown, sensitiveValues: unknown[]) {
   const values = Array.isArray(sensitiveValues) ? sensitiveValues : [sensitiveValues];
   return values.reduce((current, sensitive) => redactSensitiveValue(current, sensitive), value);
 }
-
