@@ -41,6 +41,36 @@ describe("@ait-kit/api-core", () => {
     expect(calls[1]?.init.headers).toMatchObject({ authorization: "Bearer access-token" });
   });
 
+  test("treats top-level Toss unlink error codes as failures", async () => {
+    const mtlsClient: MtlsClient = {
+      async request() {
+        return Response.json({ errorCode: "USER_KEY_NOT_FOUND", message: "missing user key" });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.tossLoginRemoveByUserKey({
+      userKey: "sensitive-toss-user-key",
+      accessToken: "expired-access-token"
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "FAILED",
+      failureReason: "missing user key",
+      providerErrorCode: "USER_KEY_NOT_FOUND",
+      upstreamStatus: 200
+    });
+    expect(JSON.stringify(response)).not.toContain("sensitive-toss-user-key");
+    expect(JSON.stringify(response)).not.toContain("expired-access-token");
+  });
+
   test("normalizes smart message bulk requests", async () => {
     const seenBodies: unknown[] = [];
     const mtlsClient: MtlsClient = {
