@@ -1,6 +1,6 @@
 {
   "name": "@ait-kit/api-orpc",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "repository": {
     "type": "git",
@@ -23,7 +23,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@ait-kit/api-core": "0.1.1",
+    "@ait-kit/api-core": "0.1.2",
     "@orpc/server": "1.14.6",
     "zod": "4.4.3"
   },

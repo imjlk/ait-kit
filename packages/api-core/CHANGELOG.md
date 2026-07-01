@@ -1,5 +1,11 @@
 # @ait-kit/api-core
 
+## 0.1.2 — 2026-07-02
+
+### Patch changes
+
+- [990b008](https://github.com/imjlk/ait-kit/commit/990b0085d968b1436b6d78623962519894d02ad5) Treat top-level Toss Login unlink error codes as failed upstream responses so runtime adapters can rely on core normalization. — Thanks @imjlk!
+
 ## 0.1.1 — 2026-07-01
 
 ### Patch changes
