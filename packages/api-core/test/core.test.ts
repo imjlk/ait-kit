@@ -74,5 +74,38 @@ describe("@ait-kit/api-core", () => {
       ]
     });
   });
-});
 
+  test("genericMtlsRequest aliases rawMtlsRequest", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const mtlsClient: MtlsClient = {
+      async request(url, init) {
+        calls.push({ url, init });
+        return Response.json({ ok: true }, { status: 201, headers: { "x-result": "ok" } });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const request = { method: "POST", path: "/anything", body: { value: 1 } };
+    const raw = await api.rawMtlsRequest(request);
+    const generic = await api.genericMtlsRequest(request);
+
+    expect(raw).toEqual(generic);
+    expect(raw).toMatchObject({
+      ok: true,
+      status: 201,
+      headers: { "x-result": "ok" },
+      body: { ok: true }
+    });
+    expect(raw.headers["content-type"]).toStartWith("application/json");
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://partner.example/anything",
+      "https://partner.example/anything"
+    ]);
+  });
+});

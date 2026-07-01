@@ -24,6 +24,8 @@ fallback.
 
 - `@ait-kit/api-core`: runtime-neutral Toss API core, request/response
   normalization, and the low-level `MtlsClient` port.
+- `@ait-kit/api-client`: HTTP client helpers for backends that call a Toss
+  mTLS proxy over a private network.
 - `@ait-kit/api-orpc`: public oRPC contract helpers for a Pages gateway.
 - `@ait-kit/api-cloudflare-service`: Cloudflare `WorkerEntrypoint` service that
   exposes typed Service Binding RPC methods backed by `TOSS_CERT.fetch`.
@@ -47,6 +49,7 @@ bun run check
 Public npm packages are managed by Sampo:
 
 - `@ait-kit/api-core`
+- `@ait-kit/api-client`
 - `@ait-kit/api-orpc`
 - `@ait-kit/api-cloudflare-service`
 
@@ -69,5 +72,7 @@ of carrying an internal copy of the Toss mTLS core. The intended migration is:
 
 1. Publish `@ait-kit/api-core` and `@ait-kit/api-cloudflare-service`.
 2. Keep the existing TrailBase Bun proxy behavior stable.
-3. Replace its internal core import with `@ait-kit/api-core`.
+3. Replace its internal core import with `@ait-kit/api-core`, and use
+   `@ait-kit/api-client` for HTTP proxy callers that need shared endpoint
+   constants.
 4. Keep certificates mounted only in the proxy or Cloudflare Worker runtime.

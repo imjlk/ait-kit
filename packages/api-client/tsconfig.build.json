@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": {
+      "@ait-kit/api-core": ["packages/api-core/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

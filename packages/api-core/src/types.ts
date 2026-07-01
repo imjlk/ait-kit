@@ -95,6 +95,7 @@ export interface AppsInTossApi {
 export interface AppsInTossApiRpc {
   health(): Promise<HealthResponse>;
   rawMtlsRequest(body: unknown): Promise<RawMtlsResponse>;
+  genericMtlsRequest(body: unknown): Promise<RawMtlsResponse>;
   tossLoginComplete(body: unknown): Promise<unknown>;
   tossLoginRemoveByUserKey(body: unknown): Promise<unknown>;
   iapOrderStatus(body: unknown): Promise<unknown>;
@@ -106,4 +107,3 @@ export interface AppsInTossApiRpc {
 export type TossMtlsMode = AppsInTossApiMode;
 export type TossMtlsCoreOptions = AppsInTossCoreOptions;
 export type TossMtlsCore = AppsInTossApiRpc;
-

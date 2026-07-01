@@ -13,6 +13,10 @@ export class AppsInTossApiService extends WorkerEntrypoint<AppsInTossServiceEnv>
     return this.rpc().rawMtlsRequest(body);
   }
 
+  async genericMtlsRequest(body: unknown): Promise<RawMtlsResponse> {
+    return this.rpc().genericMtlsRequest(body);
+  }
+
   async tossLoginComplete(body: unknown): Promise<unknown> {
     return this.rpc().tossLoginComplete(body);
   }
