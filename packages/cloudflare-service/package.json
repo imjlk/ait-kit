@@ -2,6 +2,10 @@
   "name": "@ait-kit/api-cloudflare-service",
   "version": "0.1.1",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/imjlk/ait-kit"
+  },
   "sideEffects": false,
   "types": "./dist/index.d.ts",
   "exports": {
