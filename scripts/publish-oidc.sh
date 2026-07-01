@@ -7,6 +7,7 @@ DRY_RUN="${DRY_RUN:-0}"
 
 PACKAGES=(
   "packages/api-core"
+  "packages/api-client"
   "packages/api-orpc"
   "packages/cloudflare-service"
 )

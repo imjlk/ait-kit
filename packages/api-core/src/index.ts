@@ -43,6 +43,7 @@ export function createAppsInTossApiRpc(api: AppsInTossApi): AppsInTossApiRpc {
   return {
     health: () => api.health(),
     rawMtlsRequest: (body) => api.raw.request(body),
+    genericMtlsRequest: (body) => api.raw.request(body),
     tossLoginComplete: (body) => api.login.complete(body),
     tossLoginRemoveByUserKey: (body) => api.login.removeByUserKey(body),
     iapOrderStatus: (body) => api.iap.orderStatus(body),
@@ -57,4 +58,3 @@ export function createAppsInTossApiRpcFromOptions(options: AppsInTossCoreOptions
 }
 
 export const createTossMtlsCore = createAppsInTossApiRpcFromOptions;
-

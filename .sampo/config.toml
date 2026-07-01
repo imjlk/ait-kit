@@ -25,6 +25,7 @@ ignore_unpublished = true
 ignore = ["examples/*", "templates/*"]
 fixed = [[
   "npm/@ait-kit/api-core",
+  "npm/@ait-kit/api-client",
   "npm/@ait-kit/api-orpc",
   "npm/@ait-kit/api-cloudflare-service",
 ]]
