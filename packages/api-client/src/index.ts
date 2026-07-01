@@ -22,6 +22,7 @@ export interface TossMtlsHttpClientOptions {
   baseUrl: string;
   token?: string;
   fetch?: FetchLike;
+  timeoutMs?: number;
 }
 
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -49,8 +50,21 @@ export class TossMtlsHttpClientError extends Error {
   }
 }
 
+export class TossMtlsHttpClientTimeoutError extends Error {
+  timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(`Toss mTLS proxy request timed out after ${timeoutMs}ms`);
+    this.name = "TossMtlsHttpClientTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+const DEFAULT_TIMEOUT_MS = 10_000;
+
 export function createTossMtlsHttpClient(options: TossMtlsHttpClientOptions): TossMtlsHttpClient {
   const baseUrl = normalizeBaseUrl(options.baseUrl);
+  const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
   const fetchImpl = options.fetch || globalThis.fetch;
   if (!fetchImpl) {
     throw new Error("fetch is required to create a Toss mTLS HTTP client");
@@ -63,16 +77,32 @@ export function createTossMtlsHttpClient(options: TossMtlsHttpClientOptions): To
     if (options.token) {
       headers.authorization = `Bearer ${options.token}`;
     }
+    const controller = timeoutMs > 0 ? new AbortController() : undefined;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
     const init: RequestInit = {
       method,
-      headers
+      headers,
+      signal: controller?.signal
     };
     if (body !== undefined) {
       headers["content-type"] = "application/json";
       init.body = JSON.stringify(body);
     }
-    const response = await fetchImpl(`${baseUrl}${path}`, init);
-    const text = await response.text();
+    let response: Response;
+    let text: string;
+    try {
+      response = await fetchImpl(`${baseUrl}${path}`, init);
+      text = await response.text();
+    } catch (error) {
+      if (controller?.signal.aborted) {
+        throw new TossMtlsHttpClientTimeoutError(timeoutMs);
+      }
+      throw error;
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    }
     const parsed = parseMaybeJson(text);
     if (!response.ok) {
       throw new TossMtlsHttpClientError(response.status, parsed);
@@ -98,6 +128,14 @@ function normalizeBaseUrl(baseUrl: string) {
     throw new Error("baseUrl is required");
   }
   return value.replace(/\/+$/, "");
+}
+
+function normalizeTimeoutMs(timeoutMs: number | undefined) {
+  if (timeoutMs === undefined) return DEFAULT_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new Error("timeoutMs must be a non-negative finite number");
+  }
+  return timeoutMs;
 }
 
 function parseMaybeJson(raw: string) {

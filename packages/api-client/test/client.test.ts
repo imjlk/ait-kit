@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { PROXY_ENDPOINTS, TossMtlsHttpClientError, createTossMtlsHttpClient } from "../src";
+import {
+  PROXY_ENDPOINTS,
+  TossMtlsHttpClientError,
+  TossMtlsHttpClientTimeoutError,
+  createTossMtlsHttpClient
+} from "../src";
 
 describe("@ait-kit/api-client", () => {
   test("calls health without a request body", async () => {
@@ -92,6 +97,28 @@ describe("@ait-kit/api-client", () => {
       body: {}
     });
     await expect(client.health()).rejects.toBeInstanceOf(TossMtlsHttpClientError);
+  });
+
+  test("aborts proxy calls that exceed timeoutMs", async () => {
+    let signal: AbortSignal | undefined;
+    const client = createTossMtlsHttpClient({
+      baseUrl: "http://proxy.local",
+      timeoutMs: 1,
+      fetch: async (_url, init = {}) =>
+        new Promise<Response>((_resolve, reject) => {
+          signal = init.signal ?? undefined;
+          signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+            once: true
+          });
+        })
+    });
+
+    await expect(client.health()).rejects.toMatchObject({
+      name: "TossMtlsHttpClientTimeoutError",
+      timeoutMs: 1
+    });
+    await expect(client.health()).rejects.toBeInstanceOf(TossMtlsHttpClientTimeoutError);
+    expect(signal?.aborted).toBe(true);
   });
 });
 
