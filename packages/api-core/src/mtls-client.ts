@@ -84,6 +84,9 @@ export async function rawMtlsRequest(
   body: unknown,
   options: NormalizedAppsInTossCoreOptions
 ): Promise<RawMtlsResponse> {
+  if (!options.allowRawMtls) {
+    throw clientError("RAW_MTLS_DISABLED", "raw mTLS relay is disabled", 403);
+  }
   const upstream = await requestToss(normalizeRawMtlsRequest(body), options);
   return {
     ok: upstream.status >= 200 && upstream.status < 300,
@@ -124,4 +127,3 @@ function isSafeRelativeAbsolutePath(path: string) {
     !/[\\\u0000-\u001F\u007F]/.test(path)
   );
 }
-

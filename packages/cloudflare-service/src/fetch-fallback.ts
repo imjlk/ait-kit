@@ -12,7 +12,25 @@ export async function handleFetchFallback(request: Request, rpc: AppsInTossApiRp
       return json(await rpc.health());
     }
     if (request.method === "POST" && url.pathname === "/internal/mtls/request") {
-      return json(await rpc.rawMtlsRequest(await request.json()));
+      return json(await rpc.genericMtlsRequest(await request.json()));
+    }
+    if (request.method === "POST" && url.pathname === "/internal/apps-in-toss/toss-login/complete") {
+      return json(await rpc.tossLoginComplete(await request.json()));
+    }
+    if (request.method === "POST" && url.pathname === "/internal/apps-in-toss/toss-login/remove-by-user-key") {
+      return json(await rpc.tossLoginRemoveByUserKey(await request.json()));
+    }
+    if (request.method === "POST" && url.pathname === "/internal/apps-in-toss/iap/order/status") {
+      return json(await rpc.iapOrderStatus(await request.json()));
+    }
+    if (request.method === "POST" && url.pathname === "/internal/apps-in-toss/promotion/reward/grant") {
+      return json(await rpc.promotionRewardGrant(await request.json()));
+    }
+    if (request.method === "POST" && url.pathname === "/internal/apps-in-toss/smart-message/send") {
+      return json(await rpc.smartMessageSend(await request.json()));
+    }
+    if (request.method === "POST" && url.pathname === "/internal/apps-in-toss/smart-message/send-bulk") {
+      return json(await rpc.smartMessageBulkSend(await request.json()));
     }
     return json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
   } catch (error) {
@@ -30,4 +48,3 @@ function json(body: unknown, init: ResponseInit = {}) {
     }
   });
 }
-

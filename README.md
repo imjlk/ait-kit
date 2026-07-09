@@ -18,7 +18,7 @@ flowchart LR
 Pages is the public gateway. It can host static assets, public oRPC handlers,
 session logic, and application business logic. The Apps in Toss API Worker is an
 internal RPC provider. Its `fetch` handler is only a smoke/debug compatibility
-fallback.
+fallback for HTTP proxy clients.
 
 ## Packages
 
@@ -63,7 +63,11 @@ reminders: https://github.com/apps/sampo-s-bot.
 Forward mode uses Cloudflare mTLS bindings. Upload a certificate with Wrangler
 and then add an `mtls_certificates` binding named `TOSS_CERT` to the service
 Worker config. The template defaults to stub mode so it can be deployed before
-certificate material is configured.
+certificate material is configured. Health checks report `ready: false` when
+forward mode is enabled without an mTLS transport.
+
+The generic raw mTLS relay is disabled by default. Enable it only for trusted
+internal callers by setting `TOSS_ALLOW_RAW_MTLS=true` on the service Worker.
 
 ## TrailBase Kit Reuse
 

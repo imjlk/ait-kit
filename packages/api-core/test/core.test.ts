@@ -12,13 +12,46 @@ describe("@ait-kit/api-core", () => {
     expect(first).toMatchObject({ ok: true, referrer: "SANDBOX", scopes: ["user_key"] });
   });
 
+  test("reports missing forward mTLS transport in health", async () => {
+    const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "forward" }));
+
+    await expect(api.health()).resolves.toEqual({
+      ok: false,
+      ready: false,
+      mode: "forward",
+      scope: "apps-in-toss-api",
+      error: "MISSING_MTLS_CLIENT",
+      checks: { mtlsClient: false, rawMtlsEnabled: false }
+    });
+  });
+
+  test("disables generic raw mTLS relay by default", async () => {
+    const mtlsClient: MtlsClient = {
+      async request() {
+        return Response.json({ ok: true });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    await expect(api.genericMtlsRequest({ path: "/anything" })).rejects.toMatchObject({
+      code: "RAW_MTLS_DISABLED",
+      status: 403
+    });
+  });
+
   test("builds absolute Toss URLs for forward login flow", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const mtlsClient: MtlsClient = {
       async request(url, init) {
         calls.push({ url, init });
         if (url.endsWith(TOSS_ENDPOINTS.loginGenerateToken)) {
-          return Response.json({ success: { accessToken: "access-token" } });
+          return Response.json({ success: { accessToken: "access-token", expiresIn: "3600" } });
         }
         return Response.json({ success: { userKey: "user-key", scope: "user_key profile" } });
       }
@@ -34,6 +67,7 @@ describe("@ait-kit/api-core", () => {
     const response = await api.tossLoginComplete({ authorizationCode: "code", referrer: "SANDBOX" });
 
     expect(response).toMatchObject({ ok: true, userKey: "user-key", scopes: ["user_key", "profile"] });
+    expect(response.ok && response.expiresIn).toBe(3600);
     expect(calls.map((call) => call.url)).toEqual([
       "https://partner.example/api-partner/v1/apps-in-toss/user/oauth2/generate-token",
       "https://partner.example/api-partner/v1/apps-in-toss/user/oauth2/login-me"
@@ -69,6 +103,18 @@ describe("@ait-kit/api-core", () => {
     });
     expect(JSON.stringify(response)).not.toContain("sensitive-toss-user-key");
     expect(JSON.stringify(response)).not.toContain("expired-access-token");
+  });
+
+  test("falls back to now when promotion requestedAt is null at runtime", async () => {
+    const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub", now: () => 123_456 }));
+
+    const response = await api.promotionRewardGrant({ requestedAt: null as unknown as number });
+
+    expect(response).toMatchObject({
+      ok: true,
+      providerStatus: "GRANTED",
+      grantedAt: 123_456
+    });
   });
 
   test("normalizes smart message bulk requests", async () => {
@@ -117,7 +163,8 @@ describe("@ait-kit/api-core", () => {
       createAppsInTossApi({
         mode: "forward",
         upstreamBaseUrl: "https://partner.example",
-        mtlsClient
+        mtlsClient,
+        allowRawMtls: true
       })
     );
 

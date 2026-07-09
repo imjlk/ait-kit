@@ -1,8 +1,8 @@
 {
-  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "ait-kit-toss-api-service",
   "main": "src/index.ts",
-  "compatibility_date": "2026-06-30",
+  "compatibility_date": "2026-07-09",
   "observability": {
     "enabled": true,
     "head_sampling_rate": 0.1
@@ -12,4 +12,3 @@
     "TOSS_API_BASE_URL": "https://apps-in-toss-api.toss.im"
   }
 }
-

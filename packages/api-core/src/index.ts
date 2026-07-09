@@ -4,7 +4,13 @@ import { rawMtlsRequest } from "./mtls-client";
 import { grantPromotionReward } from "./promotion";
 import { bulkSendSmartMessage, sendSmartMessage } from "./smart-message";
 import { normalizeCoreOptions } from "./toss-envelope";
-import type { AppsInTossApi, AppsInTossApiRpc, AppsInTossCoreOptions } from "./types";
+import type {
+  AppsInTossApi,
+  AppsInTossApiRpc,
+  AppsInTossCoreOptions,
+  HealthResponse,
+  NormalizedAppsInTossCoreOptions
+} from "./types";
 
 export * from "./types";
 export * from "./mtls-client";
@@ -18,7 +24,7 @@ export * from "./raw";
 export function createAppsInTossApi(options: AppsInTossCoreOptions = {}): AppsInTossApi {
   const coreOptions = normalizeCoreOptions(options);
   return {
-    health: async () => ({ ok: true, mode: coreOptions.mode, scope: "apps-in-toss-api" }),
+    health: async () => healthResponse(coreOptions),
     raw: {
       request: (body) => rawMtlsRequest(body, coreOptions)
     },
@@ -58,3 +64,30 @@ export function createAppsInTossApiRpcFromOptions(options: AppsInTossCoreOptions
 }
 
 export const createTossMtlsCore = createAppsInTossApiRpcFromOptions;
+
+function healthResponse(options: NormalizedAppsInTossCoreOptions): HealthResponse {
+  const mtlsClient = Boolean(options.mtlsClient || options.mtlsClientFactory);
+  const checks = {
+    mtlsClient,
+    rawMtlsEnabled: options.allowRawMtls
+  };
+
+  if (options.mode === "forward" && !mtlsClient) {
+    return {
+      ok: false,
+      ready: false,
+      mode: options.mode,
+      scope: "apps-in-toss-api" as const,
+      error: "MISSING_MTLS_CLIENT",
+      checks
+    };
+  }
+
+  return {
+    ok: true,
+    ready: true,
+    mode: options.mode,
+    scope: "apps-in-toss-api" as const,
+    checks
+  };
+}

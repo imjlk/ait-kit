@@ -4,6 +4,7 @@ import {
   isUpstreamFailure,
   normalizeLoginReferrer,
   normalizeScopes,
+  numberOrUndefined,
   objectOrSelf,
   readPathString,
   readPathValue,
@@ -13,9 +14,19 @@ import {
   upstreamFailureCode,
   httpStatusOk
 } from "./toss-envelope";
-import { TOSS_ENDPOINTS, type NormalizedAppsInTossCoreOptions } from "./types";
+import {
+  TOSS_ENDPOINTS,
+  type NormalizedAppsInTossCoreOptions,
+  type TossLoginCompleteInput,
+  type TossLoginCompleteResponse,
+  type TossLoginRemoveByUserKeyInput,
+  type TossLoginRemoveByUserKeyResponse
+} from "./types";
 
-export async function completeTossLogin(body: unknown, options: NormalizedAppsInTossCoreOptions) {
+export async function completeTossLogin(
+  body: TossLoginCompleteInput,
+  options: NormalizedAppsInTossCoreOptions
+): Promise<TossLoginCompleteResponse> {
   if (options.mode !== "forward") {
     return stubLoginResponse(body);
   }
@@ -93,6 +104,7 @@ export async function completeTossLogin(body: unknown, options: NormalizedAppsIn
     return { ok: false, error: "LOGIN_ME_MISSING_USER_KEY" };
   }
 
+  const agreedTerms = readPathValue(userResponse.body, ["success.agreedTerms", "agreedTerms", "data.agreedTerms"]);
   return {
     ok: true,
     userKey,
@@ -115,7 +127,7 @@ export async function completeTossLogin(body: unknown, options: NormalizedAppsIn
           "data.scopes"
         ])
     ),
-    agreedTerms: readPathValue(userResponse.body, ["success.agreedTerms", "agreedTerms", "data.agreedTerms"]) ?? [],
+    agreedTerms: Array.isArray(agreedTerms) ? agreedTerms : [],
     accessToken,
     refreshToken: readPathString(tokenResponse.body, [
       "success.refreshToken",
@@ -133,18 +145,23 @@ export async function completeTossLogin(body: unknown, options: NormalizedAppsIn
       "token_type",
       "data.token_type"
     ]),
-    expiresIn: readPathValue(tokenResponse.body, [
-      "success.expiresIn",
-      "expiresIn",
-      "data.expiresIn",
-      "success.expires_in",
-      "expires_in",
-      "data.expires_in"
-    ])
+    expiresIn: numberOrUndefined(
+      readPathValue(tokenResponse.body, [
+        "success.expiresIn",
+        "expiresIn",
+        "data.expiresIn",
+        "success.expires_in",
+        "expires_in",
+        "data.expires_in"
+      ])
+    )
   };
 }
 
-export async function removeTossLoginByUserKey(body: unknown, options: NormalizedAppsInTossCoreOptions) {
+export async function removeTossLoginByUserKey(
+  body: TossLoginRemoveByUserKeyInput,
+  options: NormalizedAppsInTossCoreOptions
+): Promise<TossLoginRemoveByUserKeyResponse> {
   if (options.mode !== "forward") {
     return stubLoginRemoveByUserKey(body);
   }
@@ -172,7 +189,7 @@ export async function removeTossLoginByUserKey(body: unknown, options: Normalize
   return normalizeTossLoginRemoveByUserKeyResponse(upstream.body, upstream.status, [tossUserKey, accessToken]);
 }
 
-export async function stubLoginResponse(body: unknown) {
+export async function stubLoginResponse(body: TossLoginCompleteInput): Promise<TossLoginCompleteResponse> {
   const request = objectOrSelf(body, {});
   const seed = `${request.authorizationCode || ""}:${request.referrer || ""}`;
   const digest = await sha256Hex(seed);
@@ -189,7 +206,7 @@ export function normalizeTossLoginRemoveByUserKeyResponse(
   upstream: unknown,
   upstreamStatus = 200,
   sensitiveValues: unknown[] = []
-) {
+): TossLoginRemoveByUserKeyResponse {
   const resultType = readPathString(upstream, ["resultType", "success.resultType", "data.resultType"]);
   if (!httpStatusOk(upstreamStatus) || isUpstreamFailure(upstream) || hasTopLevelUpstreamError(upstream)) {
     return {
@@ -208,7 +225,7 @@ export function normalizeTossLoginRemoveByUserKeyResponse(
   };
 }
 
-function stubLoginRemoveByUserKey(body: unknown) {
+function stubLoginRemoveByUserKey(body: TossLoginRemoveByUserKeyInput): TossLoginRemoveByUserKeyResponse {
   if (!unlinkTossUserKey(objectOrSelf(body, {}))) {
     return { ok: false, error: "MISSING_TOSS_USER_KEY", providerStatus: "ERROR" };
   }
@@ -270,6 +287,10 @@ function redactSensitiveValue(value: unknown, sensitive: unknown) {
 }
 
 function redactSensitiveValues(value: unknown, sensitiveValues: unknown[]) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
   const values = Array.isArray(sensitiveValues) ? sensitiveValues : [sensitiveValues];
-  return values.reduce((current, sensitive) => redactSensitiveValue(current, sensitive), value);
+  const redacted = values.reduce((current, sensitive) => redactSensitiveValue(current, sensitive), value);
+  return redacted === undefined || redacted === null ? undefined : String(redacted);
 }

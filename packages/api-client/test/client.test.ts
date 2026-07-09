@@ -12,12 +12,24 @@ describe("@ait-kit/api-client", () => {
     const client = createTossMtlsHttpClient({
       baseUrl: "http://proxy.local/",
       token: "secret",
-      fetch: fakeFetch(calls, { ok: true, mode: "stub" })
+      fetch: fakeFetch(calls, {
+        ok: true,
+        ready: true,
+        mode: "stub",
+        scope: "apps-in-toss-api",
+        checks: { mtlsClient: false, rawMtlsEnabled: false }
+      })
     });
 
     const result = await client.health();
 
-    expect(result).toEqual({ ok: true, mode: "stub" });
+    expect(result).toEqual({
+      ok: true,
+      ready: true,
+      mode: "stub",
+      scope: "apps-in-toss-api",
+      checks: { mtlsClient: false, rawMtlsEnabled: false }
+    });
     expect(calls).toEqual([
       {
         url: `http://proxy.local${PROXY_ENDPOINTS.health}`,
@@ -63,7 +75,7 @@ describe("@ait-kit/api-client", () => {
       fetch: fakeFetch(calls, { ok: true })
     });
 
-    await client.genericMtlsRequest({});
+    await client.genericMtlsRequest({ path: "/anything" });
     await client.tossLoginComplete({});
     await client.tossLoginRemoveByUserKey({});
     await client.iapOrderStatus({});
