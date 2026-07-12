@@ -139,6 +139,94 @@ describe("@ait-kit/api-core", () => {
     });
   });
 
+  test.each([
+    ["SUCCESS", "GRANTED", true],
+    ["PENDING", "PENDING", true],
+    ["FAILED", "FAILED", false]
+  ] as const)("normalizes promotion success status %s", async (success, providerStatus, ok) => {
+    const seenBodies: unknown[] = [];
+    const mtlsClient: MtlsClient = {
+      async request(url, init) {
+        seenBodies.push(JSON.parse(String(init.body)));
+        if (url.endsWith(TOSS_ENDPOINTS.promotionGetKey)) {
+          return Response.json({ resultType: "SUCCESS", success: { key: "promotion-key" } });
+        }
+        if (url.endsWith(TOSS_ENDPOINTS.promotionExecute)) {
+          return Response.json({ resultType: "SUCCESS", success: "SUCCESS" });
+        }
+        return Response.json({ resultType: "SUCCESS", success });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.promotionRewardGrant({
+      tossUserKey: "user-key",
+      promotionCode: "promotion-code",
+      amount: 1_000
+    });
+
+    expect(response).toMatchObject({ ok, providerStatus, providerTransactionKey: "promotion-key" });
+    expect(seenBodies[1]).toEqual({ promotionCode: "promotion-code", key: "promotion-key", amount: 1_000 });
+  });
+
+  test("rejects a missing promotion amount before calling Toss", async () => {
+    let called = false;
+    const mtlsClient: MtlsClient = {
+      async request() {
+        called = true;
+        return Response.json({});
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.promotionRewardGrant({
+      tossUserKey: "user-key",
+      promotionCode: "promotion-code"
+    });
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "MISSING_TOSS_PROMOTION_AMOUNT" });
+    expect(called).toBe(false);
+  });
+
+  test("rejects a non-success promotion key response", async () => {
+    const mtlsClient: MtlsClient = {
+      async request() {
+        return Response.json({ message: "promotion service unavailable" }, { status: 503 });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.promotionRewardGrant({
+      tossUserKey: "user-key",
+      promotionCode: "promotion-code",
+      amount: 1_000
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "PROMOTION_KEY_FAILED",
+      failureReason: "promotion service unavailable"
+    });
+  });
+
   test("normalizes smart message bulk requests", async () => {
     const seenBodies: unknown[] = [];
     const mtlsClient: MtlsClient = {

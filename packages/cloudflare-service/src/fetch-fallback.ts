@@ -17,7 +17,8 @@ export async function handleFetchFallback(
   try {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/internal/apps-in-toss/health") {
-      return json(await rpc.health());
+      const health = await rpc.health();
+      return json(health, { status: health.ready ? 200 : 503 });
     }
     const postHandler = request.method === "POST" ? resolvePostHandler(url.pathname, rpc) : undefined;
     if (!postHandler) {
