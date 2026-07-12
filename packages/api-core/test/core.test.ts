@@ -25,6 +25,28 @@ describe("@ait-kit/api-core", () => {
     });
   });
 
+  test("reports a missing app id for factory-backed forward health", async () => {
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        mtlsClientFactory: {
+          async forApp() {
+            throw new Error("health must not resolve the factory");
+          }
+        }
+      })
+    );
+
+    await expect(api.health()).resolves.toEqual({
+      ok: false,
+      ready: false,
+      mode: "forward",
+      scope: "apps-in-toss-api",
+      error: "MISSING_MTLS_APP_ID",
+      checks: { mtlsClient: false, rawMtlsEnabled: false }
+    });
+  });
+
   test("disables generic raw mTLS relay by default", async () => {
     const mtlsClient: MtlsClient = {
       async request() {

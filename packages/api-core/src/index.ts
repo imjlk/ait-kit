@@ -3,7 +3,7 @@ import { completeTossLogin, removeTossLoginByUserKey } from "./login";
 import { rawMtlsRequest } from "./mtls-client";
 import { grantPromotionReward } from "./promotion";
 import { bulkSendSmartMessage, sendSmartMessage } from "./smart-message";
-import { normalizeCoreOptions } from "./toss-envelope";
+import { normalizeCoreOptions, stringOrUndefined } from "./toss-envelope";
 import type {
   AppsInTossApi,
   AppsInTossApiRpc,
@@ -66,7 +66,10 @@ export function createAppsInTossApiRpcFromOptions(options: AppsInTossCoreOptions
 export const createTossMtlsCore = createAppsInTossApiRpcFromOptions;
 
 function healthResponse(options: NormalizedAppsInTossCoreOptions): HealthResponse {
-  const mtlsClient = Boolean(options.mtlsClient || options.mtlsClientFactory);
+  const hasDirectClient = Boolean(options.mtlsClient);
+  const hasFactory = Boolean(options.mtlsClientFactory);
+  const hasFactoryAppId = Boolean(stringOrUndefined(options.appId));
+  const mtlsClient = hasDirectClient || (hasFactory && hasFactoryAppId);
   const checks = {
     mtlsClient,
     rawMtlsEnabled: options.allowRawMtls
@@ -78,7 +81,7 @@ function healthResponse(options: NormalizedAppsInTossCoreOptions): HealthRespons
       ready: false,
       mode: options.mode,
       scope: "apps-in-toss-api" as const,
-      error: "MISSING_MTLS_CLIENT",
+      error: hasFactory && !hasFactoryAppId ? "MISSING_MTLS_APP_ID" : "MISSING_MTLS_CLIENT",
       checks
     };
   }

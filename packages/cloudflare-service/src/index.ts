@@ -22,7 +22,9 @@ import { createCloudflareMtlsClient } from "./mtls";
 
 export class AppsInTossApiService extends WorkerEntrypoint<AppsInTossServiceEnv> implements AppsInTossApiRpc {
   fetch(request: Request): Promise<Response> {
-    return handleFetchFallback(request, this.rpc());
+    return handleFetchFallback(request, this.rpc(), {
+      bearerToken: this.env.TOSS_HTTP_BEARER_TOKEN
+    });
   }
 
   async health(): Promise<HealthResponse> {

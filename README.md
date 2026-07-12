@@ -18,7 +18,8 @@ flowchart LR
 Pages is the public gateway. It can host static assets, public oRPC handlers,
 session logic, and application business logic. The Apps in Toss API Worker is an
 internal RPC provider. Its `fetch` handler is only a smoke/debug compatibility
-fallback for HTTP proxy clients.
+fallback for HTTP proxy clients. The template disables `workers.dev` by default,
+and POST fallback routes require the `TOSS_HTTP_BEARER_TOKEN` secret.
 
 ## Packages
 
@@ -68,6 +69,8 @@ forward mode is enabled without an mTLS transport.
 
 The generic raw mTLS relay is disabled by default. Enable it only for trusted
 internal callers by setting `TOSS_ALLOW_RAW_MTLS=true` on the service Worker.
+If an HTTP route is intentionally attached, set `TOSS_HTTP_BEARER_TOKEN` with
+`wrangler secret put` and pass the same value to the HTTP client `token` option.
 
 ## TrailBase Kit Reuse
 

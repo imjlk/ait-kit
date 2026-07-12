@@ -9,6 +9,7 @@ typed Service Binding RPC methods such as `iapOrderStatus`,
 The Worker defaults to stub mode so the template can be deployed before mTLS
 certificate material is configured. Its `fetch` handler is only a smoke/debug
 fallback; production Pages or Workers should call it through Service Binding RPC.
+The template disables `workers.dev` and preview URLs by default.
 
 Consumers that bind this Worker as a service should use the
 `AppsInTossApiService` entrypoint:
@@ -65,6 +66,18 @@ but `TOSS_CERT` is not configured.
 The generic `/internal/mtls/request` fallback and corresponding Service Binding
 RPC method are disabled unless `TOSS_ALLOW_RAW_MTLS` is set to `"true"` or `"1"`.
 Keep it disabled for public-facing Workers.
+
+## HTTP fallback
+
+POST fallback routes are disabled unless `TOSS_HTTP_BEARER_TOKEN` is configured
+as a Worker secret. If you intentionally attach a route, configure it with:
+
+```bash
+wrangler secret put TOSS_HTTP_BEARER_TOKEN
+```
+
+Pass the same value as the `token` option to `createTossMtlsHttpClient`. The
+health endpoint remains available without authentication for readiness probes.
 
 Do not put certificate files, private keys, Toss tokens, or production `.dev.vars`
 files in git.

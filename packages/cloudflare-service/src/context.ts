@@ -7,6 +7,7 @@ export interface AppsInTossServiceEnv {
   TOSS_API_MODE?: AppsInTossApiMode | string;
   TOSS_API_BASE_URL?: string;
   TOSS_ALLOW_RAW_MTLS?: string;
+  TOSS_HTTP_BEARER_TOKEN?: string;
   TOSS_APP_ID?: string;
   TOSS_PROMOTION_CODE?: string;
   TOSS_PROMOTION_AMOUNT?: string;
