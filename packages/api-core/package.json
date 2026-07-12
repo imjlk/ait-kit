@@ -1,11 +1,24 @@
 {
   "name": "@ait-kit/api-core",
   "version": "0.1.2",
+  "description": "Runtime-neutral typed Apps in Toss server API adapters and mTLS transport ports.",
   "type": "module",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/imjlk/ait-kit"
   },
+  "homepage": "https://github.com/imjlk/ait-kit#readme",
+  "bugs": {
+    "url": "https://github.com/imjlk/ait-kit/issues"
+  },
+  "keywords": [
+    "apps-in-toss",
+    "toss",
+    "mtls",
+    "api",
+    "typescript"
+  ],
   "sideEffects": false,
   "types": "./dist/index.d.ts",
   "exports": {

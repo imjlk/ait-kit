@@ -9,7 +9,12 @@ import {
   stringOrUndefined,
   upstreamFailureReason
 } from "./toss-envelope";
-import { TOSS_ENDPOINTS, type NormalizedAppsInTossCoreOptions } from "./types";
+import {
+  TOSS_ENDPOINTS,
+  type IapOrderStatusInput,
+  type IapOrderStatusResponse,
+  type NormalizedAppsInTossCoreOptions
+} from "./types";
 
 const RETRYABLE_IAP_ORDER_STATUSES = new Set([
   "NOT_FOUND",
@@ -19,7 +24,10 @@ const RETRYABLE_IAP_ORDER_STATUSES = new Set([
   "PROCESSING"
 ]);
 
-export async function getIapOrderStatus(body: unknown, options: NormalizedAppsInTossCoreOptions) {
+export async function getIapOrderStatus(
+  body: IapOrderStatusInput,
+  options: NormalizedAppsInTossCoreOptions
+): Promise<IapOrderStatusResponse> {
   if (options.mode !== "forward") {
     return stubIapOrderStatus(body);
   }
@@ -36,7 +44,7 @@ export async function getIapOrderStatus(body: unknown, options: NormalizedAppsIn
 
   const maxAttempts = iapOrderStatusMaxAttempts(options);
   const retryDelayMs = iapOrderStatusRetryDelayMs(options);
-  let normalized;
+  let normalized: IapOrderStatusResponse | undefined;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const upstream = await requestToss(
       {
@@ -49,7 +57,7 @@ export async function getIapOrderStatus(body: unknown, options: NormalizedAppsIn
     );
     normalized = normalizeIapOrderStatusResponse(request, upstream.body);
     if (!isRetryableIapOrderStatus(normalized) || attempt >= maxAttempts) {
-      return attempt > 1 ? { ...normalized, attempts: attempt } : normalized;
+      return attempt > 1 && normalized.ok ? { ...normalized, attempts: attempt } : normalized;
     }
     debugLog(options, "retrying transient iap order status", {
       orderId,
@@ -60,15 +68,15 @@ export async function getIapOrderStatus(body: unknown, options: NormalizedAppsIn
       await options.sleep(retryDelayMs);
     }
   }
-  return normalized;
+  return normalized ?? { ok: false, providerStatus: "ERROR", failureReason: "IAP order status was not checked" };
 }
 
-export function normalizeIapOrderStatusResponse(requestBody: unknown, upstream: unknown) {
+export function normalizeIapOrderStatusResponse(requestBody: IapOrderStatusInput, upstream: unknown): IapOrderStatusResponse {
   const request = objectOrSelf(requestBody, {});
   if (isUpstreamFailure(upstream)) {
     return {
       ok: false,
-      orderId: request.orderId,
+      orderId: stringOrUndefined(request.orderId),
       providerStatus: "ERROR",
       failureReason: upstreamFailureReason(upstream)
     };
@@ -78,9 +86,9 @@ export function normalizeIapOrderStatusResponse(requestBody: unknown, upstream: 
   const providerStatus = readPathString(order, ["status", "success.status", "data.status"]) || "ERROR";
   return {
     ok: true,
-    orderId: readPathString(order, ["orderId", "success.orderId", "data.orderId"]) ?? request.orderId,
+    orderId: readPathString(order, ["orderId", "success.orderId", "data.orderId"]) ?? stringOrUndefined(request.orderId),
     sku: readPathString(order, ["sku", "success.sku", "data.sku"]) ?? stringOrUndefined(request.sku),
-    providerStatus,
+    providerStatus: String(providerStatus),
     statusDeterminedAt: readPathString(order, [
       "statusDeterminedAt",
       "success.statusDeterminedAt",
@@ -90,7 +98,7 @@ export function normalizeIapOrderStatusResponse(requestBody: unknown, upstream: 
   };
 }
 
-function stubIapOrderStatus(body: unknown) {
+function stubIapOrderStatus(body: IapOrderStatusInput): IapOrderStatusResponse {
   const request = objectOrSelf(body, {});
   return {
     ok: true,
@@ -112,4 +120,3 @@ function isRetryableIapOrderStatus(result: unknown) {
   if (!object.ok) return false;
   return RETRYABLE_IAP_ORDER_STATUSES.has(String(object.providerStatus || "").trim().toUpperCase());
 }
-

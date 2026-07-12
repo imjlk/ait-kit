@@ -1,9 +1,39 @@
 export type {
   AppsInTossApiRpc,
+  HealthResponse,
+  IapOrderStatusInput,
+  IapOrderStatusResponse,
   MtlsClient,
   MtlsClientFactory,
+  PromotionRewardGrantInput,
+  PromotionRewardGrantResponse,
+  RawMtlsRequest,
+  RawMtlsResponse,
+  SmartMessageBulkSendInput,
+  SmartMessageResponse,
+  SmartMessageSendInput,
+  TossLoginCompleteInput,
+  TossLoginCompleteResponse,
+  TossLoginRemoveByUserKeyInput,
+  TossLoginRemoveByUserKeyResponse,
   TossMtlsCore,
   TossMtlsCoreOptions
+} from "@ait-kit/api-core";
+import type {
+  HealthResponse,
+  IapOrderStatusInput,
+  IapOrderStatusResponse,
+  PromotionRewardGrantInput,
+  PromotionRewardGrantResponse,
+  RawMtlsRequest,
+  RawMtlsResponse,
+  SmartMessageBulkSendInput,
+  SmartMessageResponse,
+  SmartMessageSendInput,
+  TossLoginCompleteInput,
+  TossLoginCompleteResponse,
+  TossLoginRemoveByUserKeyInput,
+  TossLoginRemoveByUserKeyResponse
 } from "@ait-kit/api-core";
 
 export const PROXY_ENDPOINTS = Object.freeze({
@@ -28,14 +58,14 @@ export interface TossMtlsHttpClientOptions {
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export interface TossMtlsHttpClient {
-  health(): Promise<unknown>;
-  genericMtlsRequest(body: unknown): Promise<unknown>;
-  tossLoginComplete(body: unknown): Promise<unknown>;
-  tossLoginRemoveByUserKey(body: unknown): Promise<unknown>;
-  iapOrderStatus(body: unknown): Promise<unknown>;
-  promotionRewardGrant(body: unknown): Promise<unknown>;
-  smartMessageSend(body: unknown): Promise<unknown>;
-  smartMessageBulkSend(body: unknown): Promise<unknown>;
+  health(): Promise<HealthResponse>;
+  genericMtlsRequest(body: RawMtlsRequest): Promise<RawMtlsResponse>;
+  tossLoginComplete(body: TossLoginCompleteInput): Promise<TossLoginCompleteResponse>;
+  tossLoginRemoveByUserKey(body: TossLoginRemoveByUserKeyInput): Promise<TossLoginRemoveByUserKeyResponse>;
+  iapOrderStatus(body: IapOrderStatusInput): Promise<IapOrderStatusResponse>;
+  promotionRewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
+  smartMessageSend(body: SmartMessageSendInput): Promise<SmartMessageResponse>;
+  smartMessageBulkSend(body: SmartMessageBulkSendInput): Promise<SmartMessageResponse>;
 }
 
 export class TossMtlsHttpClientError extends Error {
@@ -70,7 +100,7 @@ export function createTossMtlsHttpClient(options: TossMtlsHttpClientOptions): To
     throw new Error("fetch is required to create a Toss mTLS HTTP client");
   }
 
-  const request = async (method: string, path: string, body?: unknown) => {
+  const request = async <TResponse>(method: string, path: string, body?: unknown): Promise<TResponse> => {
     const headers: Record<string, string> = {
       accept: "application/json"
     };
@@ -107,18 +137,18 @@ export function createTossMtlsHttpClient(options: TossMtlsHttpClientOptions): To
     if (!response.ok) {
       throw new TossMtlsHttpClientError(response.status, parsed);
     }
-    return parsed;
+    return parsed as TResponse;
   };
 
   return {
     health: () => request("GET", PROXY_ENDPOINTS.health),
-    genericMtlsRequest: (body: unknown) => request("POST", PROXY_ENDPOINTS.genericMtlsRequest, body),
-    tossLoginComplete: (body: unknown) => request("POST", PROXY_ENDPOINTS.tossLoginComplete, body),
-    tossLoginRemoveByUserKey: (body: unknown) => request("POST", PROXY_ENDPOINTS.tossLoginRemoveByUserKey, body),
-    iapOrderStatus: (body: unknown) => request("POST", PROXY_ENDPOINTS.iapOrderStatus, body),
-    promotionRewardGrant: (body: unknown) => request("POST", PROXY_ENDPOINTS.promotionRewardGrant, body),
-    smartMessageSend: (body: unknown) => request("POST", PROXY_ENDPOINTS.smartMessageSend, body),
-    smartMessageBulkSend: (body: unknown) => request("POST", PROXY_ENDPOINTS.smartMessageBulkSend, body)
+    genericMtlsRequest: (body) => request("POST", PROXY_ENDPOINTS.genericMtlsRequest, body),
+    tossLoginComplete: (body) => request("POST", PROXY_ENDPOINTS.tossLoginComplete, body),
+    tossLoginRemoveByUserKey: (body) => request("POST", PROXY_ENDPOINTS.tossLoginRemoveByUserKey, body),
+    iapOrderStatus: (body) => request("POST", PROXY_ENDPOINTS.iapOrderStatus, body),
+    promotionRewardGrant: (body) => request("POST", PROXY_ENDPOINTS.promotionRewardGrant, body),
+    smartMessageSend: (body) => request("POST", PROXY_ENDPOINTS.smartMessageSend, body),
+    smartMessageBulkSend: (body) => request("POST", PROXY_ENDPOINTS.smartMessageBulkSend, body)
   };
 }
 

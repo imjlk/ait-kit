@@ -71,6 +71,7 @@ export function normalizeCoreOptions(options: AppsInTossCoreOptions = {}): Norma
     ...options,
     mode,
     upstreamBaseUrl: stringOrUndefined(options.upstreamBaseUrl) || DEFAULT_TOSS_API_BASE_URL,
+    allowRawMtls: options.allowRawMtls === true,
     sleep: options.sleep || defaultSleep,
     now: options.now || Date.now
   };

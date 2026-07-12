@@ -3,8 +3,14 @@ import { completeTossLogin, removeTossLoginByUserKey } from "./login";
 import { rawMtlsRequest } from "./mtls-client";
 import { grantPromotionReward } from "./promotion";
 import { bulkSendSmartMessage, sendSmartMessage } from "./smart-message";
-import { normalizeCoreOptions } from "./toss-envelope";
-import type { AppsInTossApi, AppsInTossApiRpc, AppsInTossCoreOptions } from "./types";
+import { normalizeCoreOptions, stringOrUndefined } from "./toss-envelope";
+import type {
+  AppsInTossApi,
+  AppsInTossApiRpc,
+  AppsInTossCoreOptions,
+  HealthResponse,
+  NormalizedAppsInTossCoreOptions
+} from "./types";
 
 export * from "./types";
 export * from "./mtls-client";
@@ -18,7 +24,7 @@ export * from "./raw";
 export function createAppsInTossApi(options: AppsInTossCoreOptions = {}): AppsInTossApi {
   const coreOptions = normalizeCoreOptions(options);
   return {
-    health: async () => ({ ok: true, mode: coreOptions.mode, scope: "apps-in-toss-api" }),
+    health: async () => healthResponse(coreOptions),
     raw: {
       request: (body) => rawMtlsRequest(body, coreOptions)
     },
@@ -58,3 +64,33 @@ export function createAppsInTossApiRpcFromOptions(options: AppsInTossCoreOptions
 }
 
 export const createTossMtlsCore = createAppsInTossApiRpcFromOptions;
+
+function healthResponse(options: NormalizedAppsInTossCoreOptions): HealthResponse {
+  const hasDirectClient = Boolean(options.mtlsClient);
+  const hasFactory = Boolean(options.mtlsClientFactory);
+  const hasFactoryAppId = Boolean(stringOrUndefined(options.appId));
+  const mtlsClient = hasDirectClient || (hasFactory && hasFactoryAppId);
+  const checks = {
+    mtlsClient,
+    rawMtlsEnabled: options.allowRawMtls
+  };
+
+  if (options.mode === "forward" && !mtlsClient) {
+    return {
+      ok: false,
+      ready: false,
+      mode: options.mode,
+      scope: "apps-in-toss-api" as const,
+      error: hasFactory && !hasFactoryAppId ? "MISSING_MTLS_APP_ID" : "MISSING_MTLS_CLIENT",
+      checks
+    };
+  }
+
+  return {
+    ok: true,
+    ready: true,
+    mode: options.mode,
+    scope: "apps-in-toss-api" as const,
+    checks
+  };
+}

@@ -1,11 +1,24 @@
 {
   "name": "@ait-kit/api-client",
   "version": "0.1.2",
+  "description": "Typed HTTP client helpers for Apps in Toss mTLS proxy services.",
   "type": "module",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/imjlk/ait-kit"
   },
+  "homepage": "https://github.com/imjlk/ait-kit#readme",
+  "bugs": {
+    "url": "https://github.com/imjlk/ait-kit/issues"
+  },
+  "keywords": [
+    "apps-in-toss",
+    "toss",
+    "mtls",
+    "http-client",
+    "typescript"
+  ],
   "sideEffects": false,
   "types": "./dist/index.d.ts",
   "exports": {

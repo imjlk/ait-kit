@@ -9,23 +9,31 @@ import {
   upstreamFailureCode,
   upstreamFailureReason
 } from "./toss-envelope";
-import { TOSS_ENDPOINTS, type NormalizedAppsInTossCoreOptions } from "./types";
+import {
+  TOSS_ENDPOINTS,
+  type NormalizedAppsInTossCoreOptions,
+  type PromotionRewardGrantInput,
+  type PromotionRewardGrantResponse
+} from "./types";
 
-export async function grantPromotionReward(body: unknown, options: NormalizedAppsInTossCoreOptions) {
+export async function grantPromotionReward(
+  body: PromotionRewardGrantInput,
+  options: NormalizedAppsInTossCoreOptions
+): Promise<PromotionRewardGrantResponse> {
   const request = objectOrSelf(body, {});
 
   if (options.mode !== "forward") {
     return {
       ok: true,
-      providerRequestId: request.providerRequestId,
+      providerRequestId: stringOrUndefined(request.providerRequestId),
       providerStatus: "GRANTED",
-      grantedAt: request.requestedAt ?? options.now(),
-      providerTransactionKey: request.providerTransactionKey
+      grantedAt: requestedAtOrNow(request.requestedAt, options.now),
+      providerTransactionKey: stringOrUndefined(request.providerTransactionKey)
     };
   }
 
   const providerRequestId = stringOrUndefined(request.providerRequestId);
-  const requestedAt = numberOrUndefined(request.requestedAt) ?? options.now();
+  const requestedAt = requestedAtOrNow(request.requestedAt, options.now);
   const tossUserKey = stringOrUndefined(request.tossUserKey);
   const promotionCode = stringOrUndefined(request.promotionCode) || options.tossPromotionCode;
   const promotionAmount =
@@ -98,13 +106,23 @@ export async function grantPromotionReward(body: unknown, options: NormalizedApp
   }
 
   const providerStatus = normalizePromotionStatus(resultResponse.body);
+  if (providerStatus === "FAILED") {
+    return {
+      ok: false,
+      providerRequestId,
+      providerStatus,
+      providerTransactionKey,
+      failureReason: upstreamFailureReason(resultResponse.body)
+    };
+  }
+
   return {
-    ok: providerStatus !== "FAILED",
+    ok: true,
     providerRequestId,
     providerStatus,
     providerTransactionKey,
     grantedAt: providerStatus === "GRANTED" ? requestedAt : undefined,
-    failureReason: providerStatus === "FAILED" ? upstreamFailureReason(resultResponse.body) : undefined
+    failureReason: undefined
   };
 }
 
@@ -114,10 +132,10 @@ function rewardFailure(
   failureReason: string,
   providerTransactionKey: string | undefined = undefined,
   providerErrorCode: string | undefined = undefined
-) {
+): PromotionRewardGrantResponse {
   return {
     ok: false,
-    providerRequestId: request.providerRequestId,
+    providerRequestId: stringOrUndefined(request.providerRequestId),
     providerStatus,
     providerTransactionKey,
     providerErrorCode,
@@ -141,3 +159,9 @@ function normalizePromotionStatus(value: unknown) {
   return "FAILED";
 }
 
+function requestedAtOrNow(value: unknown, now: () => number) {
+  if (value === undefined || value === null) {
+    return now();
+  }
+  return numberOrUndefined(value) ?? now();
+}

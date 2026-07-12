@@ -9,8 +9,8 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@ait-kit/api-cloudflare-service": "0.1.0",
-    "@ait-kit/api-core": "0.1.0"
+    "@ait-kit/api-cloudflare-service": "0.1.2",
+    "@ait-kit/api-core": "0.1.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260630.1",

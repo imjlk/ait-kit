@@ -15,8 +15,8 @@
       "name": "cloudflare-pages-gateway-advanced-example",
       "version": "0.1.0",
       "dependencies": {
-        "@ait-kit/api-core": "0.1.0",
-        "@ait-kit/api-orpc": "0.1.0",
+        "@ait-kit/api-core": "0.1.2",
+        "@ait-kit/api-orpc": "0.1.2",
         "@orpc/server": "1.14.6",
         "zod": "4.4.3",
       },
@@ -29,29 +29,29 @@
     },
     "packages/api-client": {
       "name": "@ait-kit/api-client",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@ait-kit/api-core": "0.1.0",
       },
     },
     "packages/api-core": {
       "name": "@ait-kit/api-core",
-      "version": "0.1.1",
+      "version": "0.1.2",
     },
     "packages/api-orpc": {
       "name": "@ait-kit/api-orpc",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
-        "@ait-kit/api-core": "workspace:*",
+        "@ait-kit/api-core": "0.1.2",
         "@orpc/server": "1.14.6",
         "zod": "4.4.3",
       },
     },
     "packages/cloudflare-service": {
       "name": "@ait-kit/api-cloudflare-service",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
-        "@ait-kit/api-core": "workspace:*",
+        "@ait-kit/api-core": "0.1.2",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "4.20260630.1",
@@ -63,8 +63,8 @@
       "name": "cloudflare-toss-api-service-template",
       "version": "0.1.0",
       "dependencies": {
-        "@ait-kit/api-cloudflare-service": "0.1.0",
-        "@ait-kit/api-core": "0.1.0",
+        "@ait-kit/api-cloudflare-service": "0.1.2",
+        "@ait-kit/api-core": "0.1.2",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "4.20260630.1",
@@ -309,13 +309,5 @@
     "youch-core": ["youch-core@0.3.3", "", { "dependencies": { "@poppinss/exception": "^1.2.2", "error-stack-parser-es": "^1.0.5" } }, "sha512-ho7XuGjLaJ2hWHoK8yFnsUGy2Y5uDpqSTq1FkHLK4/oqKtyUU1AFbOOxY4IpC9f0fTLjwYbslUz0Po5BpD1wrA=="],
 
     "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
-
-    "cloudflare-pages-gateway-advanced-example/@ait-kit/api-core": ["@ait-kit/api-core@0.1.0", "", {}, "sha512-Fo/7jMpqm8FBcjaf5ljc0IwGxooR0xJguKHoM+ei2+Jy5k8WBTusa3Yfr9xfU38nq8rQsZ6yf963+Xf2Svm8xw=="],
-
-    "cloudflare-pages-gateway-advanced-example/@ait-kit/api-orpc": ["@ait-kit/api-orpc@0.1.0", "", { "dependencies": { "@ait-kit/api-core": "0.1.0", "@orpc/server": "1.14.6", "zod": "4.4.3" } }, "sha512-zyaxW0iMvFY/KfQTnVcSBN2GBeCnij28PNyteryYuTAgzFpbNAqTPq7acmRCUUHPlAI/BH7xQ48r0mw3nqpIEA=="],
-
-    "cloudflare-toss-api-service-template/@ait-kit/api-cloudflare-service": ["@ait-kit/api-cloudflare-service@0.1.0", "", { "dependencies": { "@ait-kit/api-core": "0.1.0" } }, "sha512-C14RR0X9w+uecim8m/H9dXXaGaykXfqCVleFLGclUV9aXLtbBgZMvs+RiOA3Bnbf+a0y6P5mGxInA8u2ASvQhQ=="],
-
-    "cloudflare-toss-api-service-template/@ait-kit/api-core": ["@ait-kit/api-core@0.1.0", "", {}, "sha512-Fo/7jMpqm8FBcjaf5ljc0IwGxooR0xJguKHoM+ei2+Jy5k8WBTusa3Yfr9xfU38nq8rQsZ6yf963+Xf2Svm8xw=="],
   }
 }

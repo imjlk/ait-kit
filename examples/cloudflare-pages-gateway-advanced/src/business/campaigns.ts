@@ -1,4 +1,4 @@
-import type { PagesGatewayEnv } from "../types";
+import type { AppsInTossApiRpc } from "@ait-kit/api-core";
 
 export interface JoinCampaignInput {
   campaignId: string;
@@ -8,12 +8,11 @@ export interface JoinCampaignInput {
   amount?: number;
 }
 
-export async function joinCampaign(env: PagesGatewayEnv, input: JoinCampaignInput) {
-  return env.APPS_IN_TOSS_API.promotionRewardGrant({
+export async function joinCampaign(tossApi: AppsInTossApiRpc, input: JoinCampaignInput) {
+  return tossApi.promotionRewardGrant({
     providerRequestId: input.providerRequestId ?? input.campaignId,
     tossUserKey: input.tossUserKey,
     promotionCode: input.promotionCode,
     amount: input.amount
   });
 }
-

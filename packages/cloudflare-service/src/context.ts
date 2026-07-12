@@ -6,6 +6,8 @@ export interface AppsInTossServiceEnv {
   TOSS_CERT?: CloudflareFetcher;
   TOSS_API_MODE?: AppsInTossApiMode | string;
   TOSS_API_BASE_URL?: string;
+  TOSS_ALLOW_RAW_MTLS?: string;
+  TOSS_HTTP_BEARER_TOKEN?: string;
   TOSS_APP_ID?: string;
   TOSS_PROMOTION_CODE?: string;
   TOSS_PROMOTION_AMOUNT?: string;
@@ -21,6 +23,7 @@ export function createServiceRpc(env: AppsInTossServiceEnv): AppsInTossApiRpc {
       mode,
       upstreamBaseUrl: env.TOSS_API_BASE_URL,
       mtlsClient: env.TOSS_CERT ? createCloudflareMtlsClient(env.TOSS_CERT) : undefined,
+      allowRawMtls: env.TOSS_ALLOW_RAW_MTLS === "1" || env.TOSS_ALLOW_RAW_MTLS === "true",
       appId: env.TOSS_APP_ID,
       tossPromotionCode: env.TOSS_PROMOTION_CODE,
       tossPromotionAmount: env.TOSS_PROMOTION_AMOUNT ? parsePositiveInteger(env.TOSS_PROMOTION_AMOUNT, 0) : undefined,
@@ -35,4 +38,3 @@ export function createServiceRpc(env: AppsInTossServiceEnv): AppsInTossApiRpc {
     })
   );
 }
-

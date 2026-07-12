@@ -8,8 +8,8 @@
     "build": "rm -rf dist && mkdir -p dist && cp -R public/. dist && esbuild src/worker.ts --bundle --format=esm --platform=browser --outfile=dist/_worker.js"
   },
   "dependencies": {
-    "@ait-kit/api-core": "0.1.0",
-    "@ait-kit/api-orpc": "0.1.0",
+    "@ait-kit/api-core": "0.1.2",
+    "@ait-kit/api-orpc": "0.1.2",
     "@orpc/server": "1.14.6",
     "zod": "4.4.3"
   },

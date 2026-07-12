@@ -4,6 +4,7 @@ import {
   httpStatusOk,
   isUpstreamFailure,
   nonNegativeIntegerOrUndefined,
+  numberOrUndefined,
   objectOrSelf,
   readPathString,
   readPathValue,
@@ -11,9 +12,19 @@ import {
   upstreamFailureCode,
   upstreamFailureReason
 } from "./toss-envelope";
-import { SMART_MESSAGE_BULK_MAX_CONTEXTS, TOSS_ENDPOINTS, type NormalizedAppsInTossCoreOptions } from "./types";
+import {
+  SMART_MESSAGE_BULK_MAX_CONTEXTS,
+  TOSS_ENDPOINTS,
+  type NormalizedAppsInTossCoreOptions,
+  type SmartMessageBulkSendInput,
+  type SmartMessageResponse,
+  type SmartMessageSendInput
+} from "./types";
 
-export async function sendSmartMessage(body: unknown, options: NormalizedAppsInTossCoreOptions) {
+export async function sendSmartMessage(
+  body: SmartMessageSendInput,
+  options: NormalizedAppsInTossCoreOptions
+): Promise<SmartMessageResponse> {
   const request = objectOrSelf(body, {});
   if (options.mode !== "forward") {
     return stubSmartMessageResponse(request, 1, options.now);
@@ -30,7 +41,10 @@ export async function sendSmartMessage(body: unknown, options: NormalizedAppsInT
   return normalizeMessageResponse(request, upstream.body, upstream.status, options.now);
 }
 
-export async function bulkSendSmartMessage(body: unknown, options: NormalizedAppsInTossCoreOptions) {
+export async function bulkSendSmartMessage(
+  body: SmartMessageBulkSendInput,
+  options: NormalizedAppsInTossCoreOptions
+): Promise<SmartMessageResponse> {
   const request = objectOrSelf(body, {});
   const upstreamBody = bulkMessageUpstreamBody(request);
   if (options.mode !== "forward") {
@@ -93,13 +107,13 @@ export function normalizeMessageResponse(
   upstream: unknown,
   upstreamStatus = 200,
   now: () => number = Date.now
-) {
+): SmartMessageResponse {
   const upstreamObject = objectOrSelf(upstream, {});
   const resultType = readPathString(upstreamObject, ["resultType", "success.resultType", "data.resultType"]);
   const providerRequestId =
     readPathString(upstreamObject, ["providerRequestId", "requestId", "result.providerRequestId"]) ??
-    requestBody.providerRequestId;
-  const sentAt = upstreamObject.sentAt ?? requestBody.requestedAt ?? now();
+    stringOrUndefined(requestBody.providerRequestId);
+  const sentAt = messageSentAt(upstreamObject.sentAt, requestBody.requestedAt, now);
 
   if (!httpStatusOk(upstreamStatus)) {
     return {
@@ -116,12 +130,22 @@ export function normalizeMessageResponse(
 
   if (upstreamObject.providerStatus || (upstreamObject.status && !upstreamObject.resultType && !upstreamObject.result)) {
     const providerStatus = upstreamObject.providerStatus ?? upstreamObject.status;
+    const providerStatusText = String(providerStatus);
+    const ok = typeof upstreamObject.ok === "boolean" ? upstreamObject.ok : messageStatusOk(providerStatus);
+    if (!ok) {
+      return {
+        ok: false,
+        providerRequestId,
+        providerStatus: providerStatusText,
+        sentAt,
+        failureReason: stringOrUndefined(upstreamObject.failureReason ?? upstreamObject.errorMessage ?? upstreamObject.message)
+      };
+    }
     return {
-      ok: upstreamObject.ok ?? messageStatusOk(providerStatus),
-      providerRequestId: upstreamObject.providerRequestId ?? requestBody.providerRequestId,
-      providerStatus,
-      sentAt: upstreamObject.sentAt,
-      failureReason: upstreamObject.failureReason ?? upstreamObject.errorMessage ?? upstreamObject.message
+      ok: true,
+      providerRequestId,
+      providerStatus: providerStatusText,
+      sentAt
     };
   }
 
@@ -152,14 +176,30 @@ export function normalizeMessageResponse(
     .reduce((a, b) => Number(a) + Number(b), 0);
   const failureReason = firstMessageFailureReason(failures);
   const providerStatus = sentCount > 0 || failures.length === 0 ? "SENT" : "FAILED";
+  if (providerStatus === "FAILED") {
+    return {
+      ok: false,
+      providerRequestId,
+      providerStatus,
+      resultType,
+      sentAt,
+      failureReason,
+      msgCount: msgCount ?? (sentCount > 0 ? sentCount : undefined),
+      sentPushCount,
+      sentInboxCount,
+      detail: objectOrSelf(result, {}).detail,
+      fail: objectOrSelf(result, {}).fail,
+      failures: failures.length > 0 ? failures : undefined,
+      contentIds: contentIds.length > 0 ? contentIds : undefined
+    };
+  }
 
   return {
-    ok: providerStatus === "SENT",
+    ok: true,
     providerRequestId,
     providerStatus,
     resultType,
     sentAt,
-    failureReason,
     msgCount: msgCount ?? (sentCount > 0 ? sentCount : undefined),
     sentPushCount,
     sentInboxCount,
@@ -170,14 +210,14 @@ export function normalizeMessageResponse(
   };
 }
 
-function stubSmartMessageResponse(body: unknown, msgCount: number, now: () => number) {
+function stubSmartMessageResponse(body: unknown, msgCount: number, now: () => number): SmartMessageResponse {
   const request = objectOrSelf(body, {});
   return {
     ok: true,
-    providerRequestId: request.providerRequestId,
+    providerRequestId: stringOrUndefined(request.providerRequestId),
     providerStatus: "SENT",
     resultType: "SUCCESS",
-    sentAt: request.requestedAt ?? now(),
+    sentAt: messageSentAt(undefined, request.requestedAt, now),
     msgCount,
     sentPushCount: msgCount,
     sentInboxCount: 0
@@ -193,6 +233,12 @@ function messageContext(value: unknown, name: string) {
 
 function resolveTemplateSetCode(body: Record<string, unknown>) {
   return stringOrUndefined(body.templateSetCode ?? body.templateCode);
+}
+
+function messageSentAt(upstreamSentAt: unknown, requestSentAt: unknown, now: () => number) {
+  const upstreamTimestamp = upstreamSentAt === undefined || upstreamSentAt === null ? undefined : numberOrUndefined(upstreamSentAt);
+  const requestTimestamp = requestSentAt === undefined || requestSentAt === null ? undefined : numberOrUndefined(requestSentAt);
+  return upstreamTimestamp ?? requestTimestamp ?? now();
 }
 
 const MESSAGE_RESULT_CHANNELS = ["sentPush", "sentInbox", "sentSms", "sentAlimtalk", "sentFriendtalk"];
@@ -238,4 +284,3 @@ function messageStatusOk(status: unknown) {
   const normalized = String(status ?? "").trim().toUpperCase();
   return !["FAILED", "FAIL", "ERROR", "REJECTED"].includes(normalized);
 }
-
