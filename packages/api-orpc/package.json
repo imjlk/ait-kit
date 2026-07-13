@@ -1,6 +1,6 @@
 {
   "name": "@ait-kit/api-orpc",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Typed oRPC router helpers for Apps in Toss Cloudflare Pages gateways.",
   "type": "module",
   "license": "MIT",
@@ -37,7 +37,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@ait-kit/api-core": "0.1.2",
+    "@ait-kit/api-core": "0.2.0",
     "@orpc/server": "1.14.6",
     "zod": "4.4.3"
   },

@@ -1,6 +1,6 @@
 {
   "name": "@ait-kit/api-client",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Typed HTTP client helpers for Apps in Toss mTLS proxy services.",
   "type": "module",
   "license": "MIT",
@@ -37,7 +37,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@ait-kit/api-core": "0.1.2"
+    "@ait-kit/api-core": "0.2.0"
   },
   "publishConfig": {
     "access": "public"
