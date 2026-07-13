@@ -256,6 +256,36 @@ describe("@ait-kit/api-core", () => {
     expect(called).toBe(false);
   });
 
+  test("reuses a promotion transaction key without requiring an amount", async () => {
+    const seenUrls: string[] = [];
+    const mtlsClient: MtlsClient = {
+      async request(url) {
+        seenUrls.push(url);
+        return Response.json({ resultType: "SUCCESS", success: "SUCCESS" });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.promotionRewardGrant({
+      tossUserKey: "user-key",
+      promotionCode: "promotion-code",
+      providerTransactionKey: "existing-key"
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      providerStatus: "GRANTED",
+      providerTransactionKey: "existing-key"
+    });
+    expect(seenUrls).toEqual([`https://partner.example${TOSS_ENDPOINTS.promotionResult}`]);
+  });
+
   test("rejects a non-success promotion key response", async () => {
     const mtlsClient: MtlsClient = {
       async request() {

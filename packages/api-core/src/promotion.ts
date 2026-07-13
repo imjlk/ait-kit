@@ -48,12 +48,12 @@ export async function grantPromotionReward(
   if (!promotionCode) {
     return rewardFailure(request, "MISSING_TOSS_PROMOTION_CODE", "promotionCode is required for promotion grant");
   }
-  if (!promotionAmount) {
-    return rewardFailure(request, "MISSING_TOSS_PROMOTION_AMOUNT", "amount is required for promotion grant");
-  }
-
   let providerTransactionKey = stringOrUndefined(request.providerTransactionKey);
   if (!providerTransactionKey) {
+    if (!promotionAmount) {
+      return rewardFailure(request, "MISSING_TOSS_PROMOTION_AMOUNT", "amount is required for promotion grant");
+    }
+
     const keyResponse = await requestToss(
       { method: "POST", path: TOSS_ENDPOINTS.promotionGetKey, body: {}, tossUserKey },
       options
