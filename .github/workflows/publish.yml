@@ -60,5 +60,8 @@ jobs:
       - name: Build publishable packages
         run: bun run packages:build
 
+      - name: Verify package tarballs
+        run: bun run test:packages
+
       - name: Publish packages with npm OIDC
         run: bun run publish:oidc
