@@ -1,6 +1,6 @@
 {
   "name": "@ait-kit/api-cloudflare-service",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Cloudflare WorkerEntrypoint Service Binding provider for typed Apps in Toss server APIs.",
   "type": "module",
   "license": "MIT",
@@ -38,7 +38,7 @@
     "deploy:dry-run": "wrangler deploy --dry-run --outdir .wrangler/dry-run"
   },
   "dependencies": {
-    "@ait-kit/api-core": "0.1.2"
+    "@ait-kit/api-core": "0.2.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260712.1",

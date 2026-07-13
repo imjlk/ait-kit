@@ -1,6 +1,6 @@
 {
   "name": "@ait-kit/api-core",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Runtime-neutral typed Apps in Toss server API adapters and mTLS transport ports.",
   "type": "module",
   "license": "MIT",
