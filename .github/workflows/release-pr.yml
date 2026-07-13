@@ -42,9 +42,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Validate publishable tarballs
-        run: bun run packages:build && bun run test:packages
-
       - name: Install Sampo
         run: cargo install sampo --locked --version 0.17.4
 
@@ -66,7 +63,17 @@ jobs:
             exit 0
           fi
 
-          exit "$status"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+
+          bun run sync:internal-deps
+          bun install --lockfile-only
+          bun run check:internal-deps
+          bun install --frozen-lockfile
+
+      - name: Validate publishable tarballs
+        run: bun run packages:build && bun run test:packages
 
       - name: Create or update release PR
         id: release_pr
@@ -89,6 +96,8 @@ jobs:
             .sampo/**
             packages/**/package.json
             packages/**/CHANGELOG.md
+            examples/**/package.json
+            templates/**/package.json
             bun.lock
 
       - name: Add release label
