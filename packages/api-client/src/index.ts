@@ -100,7 +100,12 @@ export function createTossMtlsHttpClient(options: TossMtlsHttpClientOptions): To
     throw new Error("fetch is required to create a Toss mTLS HTTP client");
   }
 
-  const request = async <TResponse>(method: string, path: string, body?: unknown): Promise<TResponse> => {
+  const request = async <TResponse>(
+    method: string,
+    path: string,
+    body?: unknown,
+    acceptedErrorStatuses: readonly number[] = []
+  ): Promise<TResponse> => {
     const headers: Record<string, string> = {
       accept: "application/json"
     };
@@ -134,14 +139,14 @@ export function createTossMtlsHttpClient(options: TossMtlsHttpClientOptions): To
       }
     }
     const parsed = parseMaybeJson(text);
-    if (!response.ok) {
+    if (!response.ok && !acceptedErrorStatuses.includes(response.status)) {
       throw new TossMtlsHttpClientError(response.status, parsed);
     }
     return parsed as TResponse;
   };
 
   return {
-    health: () => request("GET", PROXY_ENDPOINTS.health),
+    health: () => request("GET", PROXY_ENDPOINTS.health, undefined, [503]),
     genericMtlsRequest: (body) => request("POST", PROXY_ENDPOINTS.genericMtlsRequest, body),
     tossLoginComplete: (body) => request("POST", PROXY_ENDPOINTS.tossLoginComplete, body),
     tossLoginRemoveByUserKey: (body) => request("POST", PROXY_ENDPOINTS.tossLoginRemoveByUserKey, body),

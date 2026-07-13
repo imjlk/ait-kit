@@ -171,6 +171,8 @@ export type PromotionRewardGrantResponse =
 
 export interface SmartMessageSendInput {
   tossUserKey?: string;
+  userKey?: string;
+  anonKey?: string;
   templateSetCode?: string;
   templateCode?: string;
   providerRequestId?: string;
@@ -184,8 +186,9 @@ export interface SmartMessageBulkSendInput {
   providerRequestId?: string;
   requestedAt?: number;
   contextList: Array<{
-    userKey?: string;
-    tossUserKey?: string;
+    userKey?: string | number;
+    tossUserKey?: string | number;
+    anonKey?: string;
     context: JsonObject;
   }>;
 }
@@ -198,9 +201,12 @@ type SmartMessageResponseBase = {
   msgCount?: number;
   sentPushCount?: number;
   sentInboxCount?: number;
+  sentSmsCount?: number;
+  sentAlimtalkCount?: number;
+  sentFriendtalkCount?: number;
   detail?: unknown;
   fail?: unknown;
-  failures?: Array<{ channel: string; contentId?: string; reachFailReason?: string }>;
+  failures?: Array<{ channel: string; contentId?: string; reachedFailReason?: string }>;
   contentIds?: string[];
 };
 

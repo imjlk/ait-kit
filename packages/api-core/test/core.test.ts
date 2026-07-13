@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { createAppsInTossApiRpc, createAppsInTossApi, TOSS_ENDPOINTS, type MtlsClient } from "../src";
+import {
+  createAppsInTossApiRpc,
+  createAppsInTossApi,
+  normalizeMessageResponse,
+  TOSS_ENDPOINTS,
+  type MtlsClient
+} from "../src";
 
 describe("@ait-kit/api-core", () => {
   test("returns deterministic stub login users without a transport", async () => {
@@ -127,6 +133,56 @@ describe("@ait-kit/api-core", () => {
     expect(JSON.stringify(response)).not.toContain("expired-access-token");
   });
 
+  test("checks an IAP order without requiring a Toss user key", async () => {
+    let seenHeaders = new Headers();
+    const mtlsClient: MtlsClient = {
+      async request(_url, init) {
+        seenHeaders = new Headers(init.headers);
+        return Response.json({
+          resultType: "SUCCESS",
+          success: { orderId: "order-id", status: "PAYMENT_COMPLETED" }
+        });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id" });
+
+    expect(response).toMatchObject({ ok: true, orderId: "order-id", providerStatus: "PAYMENT_COMPLETED" });
+    expect(seenHeaders.get("x-toss-user-key")).toBeNull();
+  });
+
+  test("surfaces a non-success IAP HTTP response", async () => {
+    const mtlsClient: MtlsClient = {
+      async request() {
+        return Response.json({ message: "order service unavailable" }, { status: 503 });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      orderId: "order-id",
+      providerStatus: "ERROR",
+      failureReason: "order service unavailable",
+      upstreamStatus: 503
+    });
+  });
+
   test("falls back to now when promotion requestedAt is null at runtime", async () => {
     const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub", now: () => 123_456 }));
 
@@ -139,12 +195,130 @@ describe("@ait-kit/api-core", () => {
     });
   });
 
+  test.each([
+    ["SUCCESS", "GRANTED", true],
+    ["PENDING", "PENDING", true],
+    ["FAILED", "FAILED", false]
+  ] as const)("normalizes promotion success status %s", async (success, providerStatus, ok) => {
+    const seenBodies: unknown[] = [];
+    const mtlsClient: MtlsClient = {
+      async request(url, init) {
+        seenBodies.push(JSON.parse(String(init.body)));
+        if (url.endsWith(TOSS_ENDPOINTS.promotionGetKey)) {
+          return Response.json({ resultType: "SUCCESS", success: { key: "promotion-key" } });
+        }
+        if (url.endsWith(TOSS_ENDPOINTS.promotionExecute)) {
+          return Response.json({ resultType: "SUCCESS", success: "SUCCESS" });
+        }
+        return Response.json({ resultType: "SUCCESS", success });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.promotionRewardGrant({
+      tossUserKey: "user-key",
+      promotionCode: "promotion-code",
+      amount: 1_000
+    });
+
+    expect(response).toMatchObject({ ok, providerStatus, providerTransactionKey: "promotion-key" });
+    expect(seenBodies[1]).toEqual({ promotionCode: "promotion-code", key: "promotion-key", amount: 1_000 });
+  });
+
+  test("rejects a missing promotion amount before calling Toss", async () => {
+    let called = false;
+    const mtlsClient: MtlsClient = {
+      async request() {
+        called = true;
+        return Response.json({});
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.promotionRewardGrant({
+      tossUserKey: "user-key",
+      promotionCode: "promotion-code"
+    });
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "MISSING_TOSS_PROMOTION_AMOUNT" });
+    expect(called).toBe(false);
+  });
+
+  test("reuses a promotion transaction key without requiring an amount", async () => {
+    const seenUrls: string[] = [];
+    const mtlsClient: MtlsClient = {
+      async request(url) {
+        seenUrls.push(url);
+        return Response.json({ resultType: "SUCCESS", success: "SUCCESS" });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.promotionRewardGrant({
+      tossUserKey: "user-key",
+      promotionCode: "promotion-code",
+      providerTransactionKey: "existing-key"
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      providerStatus: "GRANTED",
+      providerTransactionKey: "existing-key"
+    });
+    expect(seenUrls).toEqual([`https://partner.example${TOSS_ENDPOINTS.promotionResult}`]);
+  });
+
+  test("rejects a non-success promotion key response", async () => {
+    const mtlsClient: MtlsClient = {
+      async request() {
+        return Response.json({ message: "promotion service unavailable" }, { status: 503 });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.promotionRewardGrant({
+      tossUserKey: "user-key",
+      promotionCode: "promotion-code",
+      amount: 1_000
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "PROMOTION_KEY_FAILED",
+      failureReason: "promotion service unavailable"
+    });
+  });
+
   test("normalizes smart message bulk requests", async () => {
     const seenBodies: unknown[] = [];
     const mtlsClient: MtlsClient = {
       async request(_url, init) {
         seenBodies.push(JSON.parse(String(init.body)));
-        return Response.json({ success: { result: { msgCount: 2 } } });
+        return Response.json({ success: { result: { msgCount: 3 } } });
       }
     };
     const api = createAppsInTossApiRpc(
@@ -159,18 +333,153 @@ describe("@ait-kit/api-core", () => {
       templateCode: "template",
       contextList: [
         { tossUserKey: "u1", context: { name: "A" } },
-        { userKey: "u2", context: { name: "B" } }
+        { userKey: 1234, context: { name: "B" } },
+        { anonKey: "anonymous", context: { name: "C" } }
       ]
     });
 
-    expect(response).toMatchObject({ ok: true, providerStatus: "SENT", msgCount: 2 });
+    expect(response).toMatchObject({ ok: true, providerStatus: "SENT", msgCount: 3 });
     expect(seenBodies[0]).toEqual({
       templateSetCode: "template",
       contextList: [
         { userKey: "u1", context: { name: "A" } },
-        { userKey: "u2", context: { name: "B" } }
+        { userKey: 1234, context: { name: "B" } },
+        { anonKey: "anonymous", context: { name: "C" } }
       ]
     });
+  });
+
+  test("uses the smart message user header and returns all channel counts", async () => {
+    let seenHeaders = new Headers();
+    const mtlsClient: MtlsClient = {
+      async request(_url, init) {
+        seenHeaders = new Headers(init.headers);
+        return Response.json({
+          resultType: "SUCCESS",
+          success: {
+            msgCount: 3,
+            sentPushCount: 0,
+            sentInboxCount: 0,
+            sentSmsCount: 1,
+            sentAlimtalkCount: 1,
+            sentFriendtalkCount: 1
+          }
+        });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.smartMessageSend({
+      userKey: "user-key",
+      templateSetCode: "template",
+      context: { name: "A" }
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      providerStatus: "SENT",
+      msgCount: 3,
+      sentSmsCount: 1,
+      sentAlimtalkCount: 1,
+      sentFriendtalkCount: 1
+    });
+    expect(seenHeaders.get("x-user-key")).toBe("user-key");
+    expect(seenHeaders.get("x-toss-user-key")).toBeNull();
+  });
+
+  test("normalizes the documented smart message failure reason", async () => {
+    let seenHeaders = new Headers();
+    const mtlsClient: MtlsClient = {
+      async request(_url, init) {
+        seenHeaders = new Headers(init.headers);
+        return Response.json({
+          resultType: "SUCCESS",
+          success: {
+            msgCount: 0,
+            sentPushCount: 0,
+            sentInboxCount: 0,
+            sentSmsCount: 0,
+            sentAlimtalkCount: 0,
+            sentFriendtalkCount: 0,
+            fail: {
+              sentSms: [{ contentId: "message-id", reachedFailReason: "recipient unavailable" }]
+            }
+          }
+        });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    const response = await api.smartMessageSend({
+      anonKey: "anonymous-user",
+      templateSetCode: "template",
+      context: { name: "A" }
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "FAILED",
+      failureReason: "recipient unavailable",
+      failures: [
+        { channel: "sentSms", contentId: "message-id", reachedFailReason: "recipient unavailable" }
+      ]
+    });
+    expect(seenHeaders.get("x-anon-key")).toBe("anonymous-user");
+  });
+
+  test("uses channel counts when the total message count is zero", () => {
+    const response = normalizeMessageResponse(
+      {},
+      {
+        resultType: "SUCCESS",
+        success: {
+          msgCount: 0,
+          sentSmsCount: 1,
+          fail: { sentInbox: [{ reachedFailReason: "inbox unavailable" }] }
+        }
+      }
+    );
+
+    expect(response).toMatchObject({
+      ok: true,
+      providerStatus: "SENT",
+      msgCount: 0,
+      sentSmsCount: 1
+    });
+  });
+
+  test("rejects malformed smart message recipient identifiers", async () => {
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient: {
+          async request() {
+            throw new Error("invalid recipients must not reach the transport");
+          }
+        }
+      })
+    );
+
+    await expect(
+      api.smartMessageSend({
+        userKey: true as unknown as string,
+        templateSetCode: "template",
+        context: {}
+      })
+    ).rejects.toMatchObject({ code: "INVALID_MESSAGE_RECIPIENT", status: 400 });
   });
 
   test("genericMtlsRequest aliases rawMtlsRequest", async () => {

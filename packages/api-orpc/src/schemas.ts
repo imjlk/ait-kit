@@ -2,37 +2,59 @@ import { z } from "zod";
 
 export const healthInputSchema = z.object({}).optional();
 
-export const healthOutputSchema = z.looseObject({
-  ok: z.boolean(),
-  ready: z.boolean(),
+const healthOutputBase = {
   mode: z.enum(["stub", "forward"]),
   scope: z.literal("apps-in-toss-api"),
-  error: z.string().optional(),
   checks: z.object({
     mtlsClient: z.boolean(),
     rawMtlsEnabled: z.boolean()
   })
-});
+};
 
-export const smartMessageSendInputSchema = z.object({
-  tossUserKey: z.string().min(1),
-  templateSetCode: z.string().min(1).optional(),
-  templateCode: z.string().min(1).optional(),
-  context: z.record(z.string(), z.unknown())
-});
+const successResponseGuards = {
+  error: z.never().optional(),
+  failureReason: z.never().optional(),
+  providerErrorCode: z.never().optional(),
+  upstreamStatus: z.never().optional()
+};
 
-export const smartMessageOutputSchema = z.looseObject({
-  ok: z.boolean(),
-  providerRequestId: z.unknown().optional(),
+export const healthOutputSchema = z.discriminatedUnion("ok", [
+  z.looseObject({ ok: z.literal(true), ready: z.literal(true), ...healthOutputBase, ...successResponseGuards }),
+  z.looseObject({ ok: z.literal(false), ready: z.literal(false), error: z.string(), ...healthOutputBase })
+]);
+
+export const smartMessageSendInputSchema = z
+  .object({
+    tossUserKey: z.string().min(1).optional(),
+    userKey: z.string().min(1).optional(),
+    anonKey: z.string().min(1).optional(),
+    templateSetCode: z.string().min(1).optional(),
+    templateCode: z.string().min(1).optional(),
+    providerRequestId: z.string().min(1).optional(),
+    requestedAt: z.number().finite().nonnegative().optional(),
+    context: z.record(z.string(), z.unknown())
+  })
+  .refine((input) => Boolean(input.templateSetCode || input.templateCode), {
+    message: "either templateSetCode or templateCode is required"
+  })
+  .refine(
+    (input) => [input.tossUserKey, input.userKey, input.anonKey].filter((value) => value !== undefined).length === 1,
+    {
+      message: "exactly one of tossUserKey, userKey, or anonKey is required"
+    }
+  );
+
+const smartMessageOutputBase = {
+  providerRequestId: z.string().optional(),
   providerStatus: z.string(),
   resultType: z.string().optional(),
-  sentAt: z.unknown().optional(),
-  failureReason: z.unknown().optional(),
-  providerErrorCode: z.string().optional(),
-  upstreamStatus: z.number().int().optional(),
+  sentAt: z.number().finite().optional(),
   msgCount: z.number().int().nonnegative().optional(),
   sentPushCount: z.number().int().nonnegative().optional(),
   sentInboxCount: z.number().int().nonnegative().optional(),
+  sentSmsCount: z.number().int().nonnegative().optional(),
+  sentAlimtalkCount: z.number().int().nonnegative().optional(),
+  sentFriendtalkCount: z.number().int().nonnegative().optional(),
   detail: z.unknown().optional(),
   fail: z.unknown().optional(),
   failures: z
@@ -40,9 +62,20 @@ export const smartMessageOutputSchema = z.looseObject({
       z.object({
         channel: z.string(),
         contentId: z.string().optional(),
-        reachFailReason: z.string().optional()
+        reachedFailReason: z.string().optional()
       })
     )
     .optional(),
   contentIds: z.array(z.string()).optional()
-});
+};
+
+export const smartMessageOutputSchema = z.discriminatedUnion("ok", [
+  z.looseObject({ ok: z.literal(true), ...smartMessageOutputBase, ...successResponseGuards }),
+  z.looseObject({
+    ok: z.literal(false),
+    ...smartMessageOutputBase,
+    failureReason: z.string().optional(),
+    providerErrorCode: z.string().optional(),
+    upstreamStatus: z.number().int().optional()
+  })
+]);

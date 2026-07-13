@@ -6,7 +6,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/imjlk/ait-kit"
+    "url": "git+https://github.com/imjlk/ait-kit.git",
+    "directory": "packages/cloudflare-service"
   },
   "homepage": "https://github.com/imjlk/ait-kit#readme",
   "bugs": {
@@ -40,9 +41,9 @@
     "@ait-kit/api-core": "0.1.2"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "4.20260630.1",
+    "@cloudflare/workers-types": "5.20260712.1",
     "typescript": "6.0.3",
-    "wrangler": "4.105.0"
+    "wrangler": "4.110.0"
   },
   "publishConfig": {
     "access": "public"

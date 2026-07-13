@@ -12,20 +12,21 @@
   ],
   "scripts": {
     "typecheck": "cd packages/api-core && bun run typecheck && cd ../api-client && bun run typecheck && cd ../api-orpc && bun run typecheck && cd ../cloudflare-service && bun run typecheck && cd ../.. && bun run packages:build && cd templates/cloudflare-toss-api-service && bun run typecheck && cd ../../examples/cloudflare-pages-gateway-advanced && bun run typecheck",
-    "test": "bun test packages/api-core/test packages/api-client/test packages/cloudflare-service/test",
+    "test": "bun test packages/api-core/test packages/api-client/test packages/api-orpc/test packages/cloudflare-service/test",
+    "test:packages": "node scripts/test-package-tarballs.mjs",
     "packages:build": "cd packages/api-core && bun run build && cd ../api-client && bun run build && cd ../api-orpc && bun run build && cd ../cloudflare-service && bun run build",
     "build": "cd packages/api-core && bun run build && cd ../api-client && bun run build && cd ../api-orpc && bun run build && cd ../cloudflare-service && bun run build && cd ../../examples/cloudflare-pages-gateway-advanced && bun run build",
     "deploy:dry-run": "cd packages/cloudflare-service && bun run deploy:dry-run && cd ../../templates/cloudflare-toss-api-service && bun run deploy:dry-run",
-    "check": "bun run typecheck && bun run test && bun run build && bun run deploy:dry-run",
+    "check": "bun run typecheck && bun run test && bun run build && bun run test:packages && bun run deploy:dry-run",
     "release": "sampo release",
     "publish:oidc": "bash scripts/publish-oidc.sh",
-    "publish:dry-run": "bun run packages:build && DRY_RUN=1 bash scripts/publish-oidc.sh",
+    "publish:dry-run": "bun run packages:build && bun run test:packages && DRY_RUN=1 bash scripts/publish-oidc.sh",
     "sampo:add": "sampo add"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "4.20260630.1",
+    "@cloudflare/workers-types": "5.20260712.1",
     "@types/bun": "1.3.14",
     "typescript": "6.0.3",
-    "wrangler": "4.105.0"
+    "wrangler": "4.110.0"
   }
 }

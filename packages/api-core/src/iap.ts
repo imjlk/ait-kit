@@ -1,6 +1,7 @@
 import { requestToss } from "./mtls-client";
 import {
   debugLog,
+  httpStatusOk,
   iapOrderStatusMaxAttempts,
   iapOrderStatusRetryDelayMs,
   isUpstreamFailure,
@@ -38,10 +39,6 @@ export async function getIapOrderStatus(
   if (!orderId) {
     return { ok: false, error: "MISSING_ORDER_ID", providerStatus: "ERROR" };
   }
-  if (!tossUserKey) {
-    return { ok: false, error: "MISSING_TOSS_USER_KEY", providerStatus: "ERROR" };
-  }
-
   const maxAttempts = iapOrderStatusMaxAttempts(options);
   const retryDelayMs = iapOrderStatusRetryDelayMs(options);
   let normalized: IapOrderStatusResponse | undefined;
@@ -55,7 +52,7 @@ export async function getIapOrderStatus(
       },
       options
     );
-    normalized = normalizeIapOrderStatusResponse(request, upstream.body);
+    normalized = normalizeIapOrderStatusResponse(request, upstream.body, upstream.status);
     if (!isRetryableIapOrderStatus(normalized) || attempt >= maxAttempts) {
       return attempt > 1 && normalized.ok ? { ...normalized, attempts: attempt } : normalized;
     }
@@ -71,14 +68,19 @@ export async function getIapOrderStatus(
   return normalized ?? { ok: false, providerStatus: "ERROR", failureReason: "IAP order status was not checked" };
 }
 
-export function normalizeIapOrderStatusResponse(requestBody: IapOrderStatusInput, upstream: unknown): IapOrderStatusResponse {
+export function normalizeIapOrderStatusResponse(
+  requestBody: IapOrderStatusInput,
+  upstream: unknown,
+  upstreamStatus = 200
+): IapOrderStatusResponse {
   const request = objectOrSelf(requestBody, {});
-  if (isUpstreamFailure(upstream)) {
+  if (!httpStatusOk(upstreamStatus) || isUpstreamFailure(upstream)) {
     return {
       ok: false,
       orderId: stringOrUndefined(request.orderId),
       providerStatus: "ERROR",
-      failureReason: upstreamFailureReason(upstream)
+      failureReason: upstreamFailureReason(upstream),
+      upstreamStatus
     };
   }
 

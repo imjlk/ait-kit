@@ -43,6 +43,23 @@ describe("@ait-kit/api-client", () => {
     ]);
   });
 
+  test("returns an unhealthy health payload from a 503 response", async () => {
+    const health = {
+      ok: false as const,
+      ready: false as const,
+      mode: "forward" as const,
+      scope: "apps-in-toss-api" as const,
+      error: "MISSING_MTLS_CLIENT",
+      checks: { mtlsClient: false, rawMtlsEnabled: false }
+    };
+    const client = createTossMtlsHttpClient({
+      baseUrl: "http://proxy.local",
+      fetch: async () => Response.json(health, { status: 503 })
+    });
+
+    await expect(client.health()).resolves.toEqual(health);
+  });
+
   test("posts adapter requests with bearer auth and JSON bodies", async () => {
     const calls: FetchCall[] = [];
     const client = createTossMtlsHttpClient({

@@ -1,9 +1,11 @@
 import { requestToss } from "./mtls-client";
 import {
+  httpStatusOk,
   isUpstreamFailure,
   numberOrUndefined,
   objectOrSelf,
   positiveIntegerOrUndefined,
+  readPathValue,
   readPathString,
   stringOrUndefined,
   upstreamFailureCode,
@@ -46,14 +48,17 @@ export async function grantPromotionReward(
   if (!promotionCode) {
     return rewardFailure(request, "MISSING_TOSS_PROMOTION_CODE", "promotionCode is required for promotion grant");
   }
-
   let providerTransactionKey = stringOrUndefined(request.providerTransactionKey);
   if (!providerTransactionKey) {
+    if (!promotionAmount) {
+      return rewardFailure(request, "MISSING_TOSS_PROMOTION_AMOUNT", "amount is required for promotion grant");
+    }
+
     const keyResponse = await requestToss(
       { method: "POST", path: TOSS_ENDPOINTS.promotionGetKey, body: {}, tossUserKey },
       options
     );
-    if (isUpstreamFailure(keyResponse.body)) {
+    if (!httpStatusOk(keyResponse.status) || isUpstreamFailure(keyResponse.body)) {
       return rewardFailure(request, "PROMOTION_KEY_FAILED", upstreamFailureReason(keyResponse.body));
     }
     providerTransactionKey = readPathString(keyResponse.body, ["success.key", "key", "data.key"]);
@@ -75,7 +80,7 @@ export async function grantPromotionReward(
       options
     );
     const executeErrorCode = upstreamFailureCode(executeResponse.body);
-    if (isUpstreamFailure(executeResponse.body)) {
+    if (!httpStatusOk(executeResponse.status) || isUpstreamFailure(executeResponse.body)) {
       return rewardFailure(
         request,
         "PROMOTION_EXECUTE_FAILED",
@@ -95,7 +100,7 @@ export async function grantPromotionReward(
     },
     options
   );
-  if (isUpstreamFailure(resultResponse.body)) {
+  if (!httpStatusOk(resultResponse.status) || isUpstreamFailure(resultResponse.body)) {
     return {
       ok: true,
       providerRequestId,
@@ -144,15 +149,19 @@ function rewardFailure(
 }
 
 function normalizePromotionStatus(value: unknown) {
+  const success = readPathValue(value, ["success"]);
   const status = String(
-    readPathString(value, [
-      "success.status",
-      "status",
-      "data.status",
-      "resultType",
-      "success.resultType",
-      "data.resultType"
-    ]) || ""
+    (typeof success === "string" ? success : undefined) ||
+      readPathString(value, [
+        "success.status",
+        "status",
+        "data.status",
+        "data.success",
+        "success.resultType",
+        "data.resultType",
+        "resultType"
+      ]) ||
+      ""
   ).toUpperCase();
   if (["SUCCESS", "SUCCEEDED", "GRANTED", "DONE", "COMPLETED"].includes(status)) return "GRANTED";
   if (["PENDING", "WAITING", "PROCESSING"].includes(status)) return "PENDING";

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { AppsInTossApiRpc } from "@ait-kit/api-core";
+import type { AppsInTossApiRpc, HealthResponse } from "@ait-kit/api-core";
 import { handleFetchFallback } from "../src/fetch-fallback";
 
 describe("Cloudflare HTTP fallback", () => {
@@ -11,6 +11,23 @@ describe("Cloudflare HTTP fallback", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ ok: true, ready: true });
+  });
+
+  test("returns service unavailable when health is not ready", async () => {
+    const response = await handleFetchFallback(
+      new Request("https://service.example/internal/apps-in-toss/health"),
+      fakeRpc({
+        ok: false,
+        ready: false,
+        mode: "forward",
+        scope: "apps-in-toss-api",
+        error: "MISSING_MTLS_CLIENT",
+        checks: { mtlsClient: false, rawMtlsEnabled: false }
+      })
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, ready: false });
   });
 
   test("keeps POST routes disabled when no bearer token is configured", async () => {
@@ -50,16 +67,18 @@ function promotionRequest(providedToken?: string, expectedToken?: string) {
   );
 }
 
-function fakeRpc(): AppsInTossApiRpc {
+function fakeRpc(
+  health: HealthResponse = {
+    ok: true,
+    ready: true,
+    mode: "stub",
+    scope: "apps-in-toss-api",
+    checks: { mtlsClient: false, rawMtlsEnabled: false }
+  }
+): AppsInTossApiRpc {
   return {
     async health() {
-      return {
-        ok: true,
-        ready: true,
-        mode: "stub",
-        scope: "apps-in-toss-api",
-        checks: { mtlsClient: false, rawMtlsEnabled: false }
-      };
+      return health;
     },
     async rawMtlsRequest() {
       return { ok: true, status: 200, headers: {}, body: {} };

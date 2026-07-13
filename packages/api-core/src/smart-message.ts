@@ -34,7 +34,7 @@ export async function sendSmartMessage(
       method: "POST",
       path: TOSS_ENDPOINTS.messageSend,
       body: messageUpstreamBody(request),
-      tossUserKey: stringOrUndefined(request.tossUserKey)
+      headers: messageRecipientHeaders(request)
     },
     options
   );
@@ -90,12 +90,13 @@ export function bulkMessageUpstreamBody(body: Record<string, unknown>) {
     templateSetCode,
     contextList: body.contextList.map((entry, index) => {
       const item = objectOrSelf(entry, {});
-      const userKey = stringOrUndefined(item.userKey ?? item.tossUserKey);
-      if (!userKey) {
-        throw clientError("MISSING_CONTEXT_USER_KEY", `contextList[${index}].userKey is required`);
-      }
+      const recipient = messageRecipient(
+        item,
+        "INVALID_CONTEXT_RECIPIENT",
+        `contextList[${index}] must include exactly one of userKey, tossUserKey, or anonKey`
+      );
       return {
-        userKey,
+        ...recipient,
         context: messageContext(item.context, `contextList[${index}].context`)
       };
     })
@@ -169,11 +170,15 @@ export function normalizeMessageResponse(
   const msgCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["msgCount"]));
   const sentPushCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["sentPushCount"]));
   const sentInboxCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["sentInboxCount"]));
+  const sentSmsCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["sentSmsCount"]));
+  const sentAlimtalkCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["sentAlimtalkCount"]));
+  const sentFriendtalkCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["sentFriendtalkCount"]));
   const failures = collectMessageFailures(result);
   const contentIds = collectMessageContentIds(objectOrSelf(result, {}).detail);
-  const sentCount = [msgCount, sentPushCount, sentInboxCount]
+  const channelSentCount = [sentPushCount, sentInboxCount, sentSmsCount, sentAlimtalkCount, sentFriendtalkCount]
     .filter((value) => value !== undefined)
     .reduce((a, b) => Number(a) + Number(b), 0);
+  const sentCount = Math.max(msgCount ?? 0, channelSentCount);
   const failureReason = firstMessageFailureReason(failures);
   const providerStatus = sentCount > 0 || failures.length === 0 ? "SENT" : "FAILED";
   if (providerStatus === "FAILED") {
@@ -187,6 +192,9 @@ export function normalizeMessageResponse(
       msgCount: msgCount ?? (sentCount > 0 ? sentCount : undefined),
       sentPushCount,
       sentInboxCount,
+      sentSmsCount,
+      sentAlimtalkCount,
+      sentFriendtalkCount,
       detail: objectOrSelf(result, {}).detail,
       fail: objectOrSelf(result, {}).fail,
       failures: failures.length > 0 ? failures : undefined,
@@ -203,6 +211,9 @@ export function normalizeMessageResponse(
     msgCount: msgCount ?? (sentCount > 0 ? sentCount : undefined),
     sentPushCount,
     sentInboxCount,
+    sentSmsCount,
+    sentAlimtalkCount,
+    sentFriendtalkCount,
     detail: objectOrSelf(result, {}).detail,
     fail: objectOrSelf(result, {}).fail,
     failures: failures.length > 0 ? failures : undefined,
@@ -220,8 +231,45 @@ function stubSmartMessageResponse(body: unknown, msgCount: number, now: () => nu
     sentAt: messageSentAt(undefined, request.requestedAt, now),
     msgCount,
     sentPushCount: msgCount,
-    sentInboxCount: 0
+    sentInboxCount: 0,
+    sentSmsCount: 0,
+    sentAlimtalkCount: 0,
+    sentFriendtalkCount: 0
   };
+}
+
+function messageRecipientHeaders(body: Record<string, unknown>): Record<string, string> {
+  const recipient = messageRecipient(
+    body,
+    "INVALID_MESSAGE_RECIPIENT",
+    "exactly one of userKey, tossUserKey, or anonKey is required"
+  );
+  return "userKey" in recipient
+    ? { "x-user-key": String(recipient.userKey) }
+    : { "x-anon-key": recipient.anonKey };
+}
+
+function messageRecipient(
+  body: Record<string, unknown>,
+  errorCode: string,
+  errorMessage: string
+): { userKey: string | number } | { anonKey: string } {
+  const userKey = messageRecipientValue(body.userKey);
+  const tossUserKey = messageRecipientValue(body.tossUserKey);
+  const anonKey = typeof body.anonKey === "string" ? stringOrUndefined(body.anonKey) : undefined;
+  if (userKey !== undefined && tossUserKey === undefined && anonKey === undefined) return { userKey };
+  if (tossUserKey !== undefined && userKey === undefined && anonKey === undefined) {
+    return { userKey: tossUserKey };
+  }
+  if (anonKey !== undefined && userKey === undefined && tossUserKey === undefined) return { anonKey };
+  throw clientError(errorCode, errorMessage);
+}
+
+function messageRecipientValue(value: unknown): string | number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  return typeof value === "string" ? stringOrUndefined(value) : undefined;
 }
 
 function messageContext(value: unknown, name: string) {
@@ -244,7 +292,7 @@ function messageSentAt(upstreamSentAt: unknown, requestSentAt: unknown, now: () 
 const MESSAGE_RESULT_CHANNELS = ["sentPush", "sentInbox", "sentSms", "sentAlimtalk", "sentFriendtalk"];
 
 function collectMessageFailures(result: unknown) {
-  const failures: Array<{ channel: string; contentId?: string; reachFailReason?: string }> = [];
+  const failures: Array<{ channel: string; contentId?: string; reachedFailReason?: string }> = [];
   const fail = objectOrSelf(objectOrSelf(result, {}).fail, {});
   for (const channel of MESSAGE_RESULT_CHANNELS) {
     const entries = Array.isArray(fail[channel]) ? fail[channel] : [];
@@ -253,7 +301,13 @@ function collectMessageFailures(result: unknown) {
       failures.push({
         channel,
         contentId: readPathString(entry, ["contentId", "id"]),
-        reachFailReason: readPathString(entry, ["reachFailReason", "reason", "message", "errorMessage"])
+        reachedFailReason: readPathString(entry, [
+          "reachedFailReason",
+          "reachFailReason",
+          "reason",
+          "message",
+          "errorMessage"
+        ])
       });
     }
   }
@@ -273,9 +327,9 @@ function collectMessageContentIds(detail: unknown) {
   return contentIds;
 }
 
-function firstMessageFailureReason(failures: Array<{ reachFailReason?: string }>) {
+function firstMessageFailureReason(failures: Array<{ reachedFailReason?: string }>) {
   for (const failure of failures) {
-    if (failure.reachFailReason) return failure.reachFailReason;
+    if (failure.reachedFailReason) return failure.reachedFailReason;
   }
   return undefined;
 }
