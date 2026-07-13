@@ -22,6 +22,16 @@ describe("@ait-kit/api-orpc schemas", () => {
         checks: { mtlsClient: false, rawMtlsEnabled: false }
       }).success
     ).toBe(false);
+    expect(
+      healthOutputSchema.safeParse({
+        ok: true,
+        ready: true,
+        mode: "stub",
+        scope: "apps-in-toss-api",
+        error: "unexpected",
+        checks: { mtlsClient: false, rawMtlsEnabled: false }
+      }).success
+    ).toBe(false);
   });
 
   test("requires a template and exactly one message recipient", () => {
@@ -74,6 +84,13 @@ describe("@ait-kit/api-orpc schemas", () => {
     expect(response).toMatchObject({ ok: true, providerRequestId: "request-id", sentAt: 123, sentSmsCount: 1 });
     expect(
       smartMessageOutputSchema.safeParse({ ok: true, providerStatus: "SENT", sentAt: "not-a-timestamp" }).success
+    ).toBe(false);
+    expect(
+      smartMessageOutputSchema.safeParse({
+        ok: true,
+        providerStatus: "SENT",
+        failureReason: "unexpected"
+      }).success
     ).toBe(false);
   });
 });

@@ -27,6 +27,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -47,6 +48,11 @@ jobs:
       - name: Install Sampo
         run: cargo install sampo --locked --version 0.17.4
 
+      - name: Require release token
+        env:
+          SAMPO_RELEASE_TOKEN: ${{ secrets.SAMPO_RELEASE_TOKEN }}
+        run: test -n "$SAMPO_RELEASE_TOKEN"
+
       - name: Prepare release changes
         shell: bash
         run: |
@@ -66,7 +72,7 @@ jobs:
         id: release_pr
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
-          token: ${{ secrets.SAMPO_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SAMPO_RELEASE_TOKEN }}
           branch: release/sampo
           base: main
           title: "release: version packages"
@@ -88,7 +94,7 @@ jobs:
       - name: Add release label
         if: steps.release_pr.outputs.pull-request-number != ''
         env:
-          GH_TOKEN: ${{ secrets.SAMPO_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SAMPO_RELEASE_TOKEN }}
           PR_NUMBER: ${{ steps.release_pr.outputs.pull-request-number }}
         shell: bash
         run: |

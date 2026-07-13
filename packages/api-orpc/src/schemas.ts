@@ -11,8 +11,15 @@ const healthOutputBase = {
   })
 };
 
+const successResponseGuards = {
+  error: z.never().optional(),
+  failureReason: z.never().optional(),
+  providerErrorCode: z.never().optional(),
+  upstreamStatus: z.never().optional()
+};
+
 export const healthOutputSchema = z.discriminatedUnion("ok", [
-  z.looseObject({ ok: z.literal(true), ready: z.literal(true), ...healthOutputBase }),
+  z.looseObject({ ok: z.literal(true), ready: z.literal(true), ...healthOutputBase, ...successResponseGuards }),
   z.looseObject({ ok: z.literal(false), ready: z.literal(false), error: z.string(), ...healthOutputBase })
 ]);
 
@@ -63,7 +70,7 @@ const smartMessageOutputBase = {
 };
 
 export const smartMessageOutputSchema = z.discriminatedUnion("ok", [
-  z.looseObject({ ok: z.literal(true), ...smartMessageOutputBase }),
+  z.looseObject({ ok: z.literal(true), ...smartMessageOutputBase, ...successResponseGuards }),
   z.looseObject({
     ok: z.literal(false),
     ...smartMessageOutputBase,

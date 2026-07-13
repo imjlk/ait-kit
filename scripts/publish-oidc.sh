@@ -27,7 +27,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const packageJsonPath = process.argv[2];
-const packageDir = process.argv[3];
+const packageDir = fs.realpathSync(process.argv[3]);
 const manifest = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 
 function exportTargets(value) {
@@ -42,11 +42,35 @@ if (targets.length === 0) {
   process.exit(1);
 }
 
-const missing = targets.filter((target) => !fs.existsSync(path.join(packageDir, target)));
+const invalid = [];
+const missing = [];
+for (const target of targets) {
+  const resolved = path.resolve(packageDir, target);
+  if (!isWithinPackage(resolved, packageDir)) {
+    invalid.push(target);
+    continue;
+  }
+  if (!fs.existsSync(resolved)) {
+    missing.push(target);
+    continue;
+  }
+  if (!isWithinPackage(fs.realpathSync(resolved), packageDir)) {
+    invalid.push(target);
+  }
+}
+
+if (invalid.length > 0) {
+  console.error(`[${manifest.name}] Package export targets escape the package root: ${invalid.join(", ")}`);
+  process.exit(1);
+}
 
 if (missing.length > 0) {
   console.error(`[${manifest.name}] Missing package export targets: ${missing.join(", ")}`);
   process.exit(1);
+}
+
+function isWithinPackage(candidate, root) {
+  return candidate === root || candidate.startsWith(`${root}${path.sep}`);
 }
 NODE
 }
