@@ -54,6 +54,9 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Check internal dependency versions
+        run: bun run check:internal-deps
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
