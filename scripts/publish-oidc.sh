@@ -55,7 +55,10 @@ fi
 
 PACKAGES=()
 if [[ -n "$discovered_packages" ]]; then
-  mapfile -t PACKAGES <<<"$discovered_packages"
+  # Read into the array line-by-line without mapfile (Bash 3.2 compatible).
+  while IFS= read -r line; do
+    PACKAGES+=("$line")
+  done <<<"$discovered_packages"
 fi
 
 if [[ ${#PACKAGES[@]} -eq 0 ]]; then
