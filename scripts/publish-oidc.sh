@@ -5,12 +5,36 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DRY_RUN="${DRY_RUN:-0}"
 
-PACKAGES=(
-  "packages/api-core"
-  "packages/api-client"
-  "packages/api-orpc"
-  "packages/api-cloudflare-service"
+# Discover publishable packages dynamically so new packages are picked up
+# automatically. Mirrors the test-package-tarballs.mjs selection criteria:
+# public (not private) with publishConfig.access === "public".
+PACKAGES=()
+while IFS= read -r package_dir; do
+  PACKAGES+=("$package_dir")
+done < <(node - <<'NODE' "$ROOT_DIR"
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+const packagesDir = path.join(root, "packages");
+const dirs = fs.readdirSync(packagesDir, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort();
+for (const dir of dirs) {
+  const manifestPath = path.join(packagesDir, dir, "package.json");
+  if (!fs.existsSync(manifestPath)) continue;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  if (manifest.private !== true && manifest.publishConfig?.access === "public") {
+    console.log(`packages/${dir}`);
+  }
+}
+NODE
 )
+
+if [[ ${#PACKAGES[@]} -eq 0 ]]; then
+  echo "No publishable packages were discovered under packages/." >&2
+  exit 1
+fi
 
 read_package_field() {
   local package_json="$1"
