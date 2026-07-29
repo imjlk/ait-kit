@@ -5,12 +5,66 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DRY_RUN="${DRY_RUN:-0}"
 
-PACKAGES=(
-  "packages/api-core"
-  "packages/api-client"
-  "packages/api-orpc"
-  "packages/cloudflare-service"
-)
+# Discover publishable packages dynamically so new packages are picked up
+# automatically. Mirrors the test-package-tarballs.mjs selection criteria:
+# public (not private) with publishConfig.access === "public". Packages are
+# emitted in dependency (topological) order so dependencies publish before the
+# packages that depend on them, matching how consumers install them.
+if ! discovered_packages="$(
+  node - "$ROOT_DIR" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+const packagesDir = path.join(root, "packages");
+const dirs = fs.readdirSync(packagesDir, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort();
+const byDir = new Map();
+const byName = new Map();
+for (const dir of dirs) {
+  const manifestPath = path.join(packagesDir, dir, "package.json");
+  if (!fs.existsSync(manifestPath)) continue;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  if (manifest.private !== true && manifest.publishConfig?.access === "public") {
+    byDir.set(dir, manifest);
+    if (typeof manifest.name === "string") byName.set(manifest.name, dir);
+  }
+}
+const visited = new Set();
+const ordered = [];
+function visit(dir) {
+  if (visited.has(dir)) return;
+  visited.add(dir);
+  const manifest = byDir.get(dir);
+  if (!manifest) return;
+  const deps = Object.keys(manifest.dependencies ?? {});
+  for (const dep of deps) {
+    const depDir = byName.get(dep);
+    if (depDir) visit(depDir);
+  }
+  ordered.push(dir);
+}
+for (const dir of [...byDir.keys()].sort()) visit(dir);
+for (const dir of ordered) console.log(`packages/${dir}`);
+NODE
+)"; then
+  echo "Failed to discover publishable packages." >&2
+  exit 1
+fi
+
+PACKAGES=()
+if [[ -n "$discovered_packages" ]]; then
+  # Read into the array line-by-line without mapfile (Bash 3.2 compatible).
+  while IFS= read -r line; do
+    PACKAGES+=("$line")
+  done <<<"$discovered_packages"
+fi
+
+if [[ ${#PACKAGES[@]} -eq 0 ]]; then
+  echo "No publishable packages were discovered under packages/." >&2
+  exit 1
+fi
 
 read_package_field() {
   local package_json="$1"

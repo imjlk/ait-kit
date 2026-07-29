@@ -61,9 +61,10 @@ Trusted Publishing. Configure npm Trusted Publishing for
 `.github/workflows/publish.yml`, and install Sampo's GitHub App for PR changeset
 reminders: https://github.com/apps/sampo-s-bot.
 
-Store a fine-grained GitHub token with repository Contents and Pull requests
-write access as the Actions secret `SAMPO_RELEASE_TOKEN`. The release workflow
-uses it to update `release/sampo` so CI also runs on the automated release PR.
+Store a fine-grained GitHub token with repository Contents, Pull requests, and
+Issues write access as the Actions secret `SAMPO_RELEASE_TOKEN`. The release
+workflow uses it to update `release/sampo`, trigger CI on the automated release
+PR, and create or attach its `release` label.
 
 Forward mode uses Cloudflare mTLS bindings. Upload a certificate with Wrangler
 and then add an `mtls_certificates` binding named `TOSS_CERT` to the service

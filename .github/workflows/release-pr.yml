@@ -110,7 +110,16 @@ jobs:
           set +e
 
           for attempt in 1 2 3; do
-            if gh pr edit "$PR_NUMBER" --add-label release; then
+            if ! gh api "repos/${GITHUB_REPOSITORY}/labels/release" >/dev/null 2>&1; then
+              gh api --method POST "repos/${GITHUB_REPOSITORY}/labels" \
+                -f name=release \
+                -f color=0E8A16 \
+                -f description='Automated package release' >/dev/null 2>&1
+            fi
+
+            if gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" \
+              -f 'labels[]=release' >/dev/null; then
               exit 0
             fi
 

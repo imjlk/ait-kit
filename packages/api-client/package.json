@@ -34,6 +34,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && bun build src/index.ts --outfile dist/index.js --format esm --target browser --packages external",
+    "test": "bun test test",
     "prepack": "bun run build"
   },
   "dependencies": {

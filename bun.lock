@@ -29,29 +29,16 @@
     },
     "packages/api-client": {
       "name": "@ait-kit/api-client",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "dependencies": {
         "@ait-kit/api-core": "0.1.0",
       },
     },
-    "packages/api-core": {
-      "name": "@ait-kit/api-core",
-      "version": "0.1.2",
-    },
-    "packages/api-orpc": {
-      "name": "@ait-kit/api-orpc",
-      "version": "0.1.2",
-      "dependencies": {
-        "@ait-kit/api-core": "0.1.2",
-        "@orpc/server": "1.14.6",
-        "zod": "4.4.3",
-      },
-    },
-    "packages/cloudflare-service": {
+    "packages/api-cloudflare-service": {
       "name": "@ait-kit/api-cloudflare-service",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "dependencies": {
-        "@ait-kit/api-core": "0.1.2",
+        "@ait-kit/api-core": "0.2.0",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "5.20260712.1",
@@ -59,12 +46,25 @@
         "wrangler": "4.110.0",
       },
     },
+    "packages/api-core": {
+      "name": "@ait-kit/api-core",
+      "version": "0.2.0",
+    },
+    "packages/api-orpc": {
+      "name": "@ait-kit/api-orpc",
+      "version": "0.2.0",
+      "dependencies": {
+        "@ait-kit/api-core": "0.1.2",
+        "@orpc/server": "1.14.6",
+        "zod": "4.4.3",
+      },
+    },
     "templates/cloudflare-toss-api-service": {
       "name": "cloudflare-toss-api-service-template",
       "version": "0.1.0",
       "dependencies": {
-        "@ait-kit/api-cloudflare-service": "0.1.2",
-        "@ait-kit/api-core": "0.1.2",
+        "@ait-kit/api-cloudflare-service": "0.2.0",
+        "@ait-kit/api-core": "0.2.0",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "5.20260712.1",
@@ -76,7 +76,7 @@
   "packages": {
     "@ait-kit/api-client": ["@ait-kit/api-client@workspace:packages/api-client"],
 
-    "@ait-kit/api-cloudflare-service": ["@ait-kit/api-cloudflare-service@workspace:packages/cloudflare-service"],
+    "@ait-kit/api-cloudflare-service": ["@ait-kit/api-cloudflare-service@workspace:packages/api-cloudflare-service"],
 
     "@ait-kit/api-core": ["@ait-kit/api-core@workspace:packages/api-core"],
 
