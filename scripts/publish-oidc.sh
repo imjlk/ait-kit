@@ -9,7 +9,7 @@ PACKAGES=(
   "packages/api-core"
   "packages/api-client"
   "packages/api-orpc"
-  "packages/cloudflare-service"
+  "packages/api-cloudflare-service"
 )
 
 read_package_field() {

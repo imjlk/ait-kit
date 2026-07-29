@@ -13,7 +13,7 @@
     "paths": {
       "@ait-kit/api-core": ["packages/api-core/src/index.ts"],
       "@ait-kit/api-orpc": ["packages/api-orpc/src/index.ts"],
-      "@ait-kit/api-cloudflare-service": ["packages/cloudflare-service/src/index.ts"]
+      "@ait-kit/api-cloudflare-service": ["packages/api-cloudflare-service/src/index.ts"]
     }
   }
 }

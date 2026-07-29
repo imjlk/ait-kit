@@ -7,7 +7,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/imjlk/ait-kit.git",
-    "directory": "packages/cloudflare-service"
+    "directory": "packages/api-cloudflare-service"
   },
   "homepage": "https://github.com/imjlk/ait-kit#readme",
   "bugs": {

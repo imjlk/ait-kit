@@ -11,12 +11,12 @@
     "templates/*"
   ],
   "scripts": {
-    "typecheck": "cd packages/api-core && bun run typecheck && cd ../api-client && bun run typecheck && cd ../api-orpc && bun run typecheck && cd ../cloudflare-service && bun run typecheck && cd ../.. && bun run packages:build && cd templates/cloudflare-toss-api-service && bun run typecheck && cd ../../examples/cloudflare-pages-gateway-advanced && bun run typecheck",
-    "test": "bun test packages/api-core/test packages/api-client/test packages/api-orpc/test packages/cloudflare-service/test",
+    "typecheck": "cd packages/api-core && bun run typecheck && cd ../api-client && bun run typecheck && cd ../api-orpc && bun run typecheck && cd ../api-cloudflare-service && bun run typecheck && cd ../.. && bun run packages:build && cd templates/cloudflare-toss-api-service && bun run typecheck && cd ../../examples/cloudflare-pages-gateway-advanced && bun run typecheck",
+    "test": "bun test packages/api-core/test packages/api-client/test packages/api-orpc/test packages/api-cloudflare-service/test",
     "test:packages": "node scripts/test-package-tarballs.mjs",
-    "packages:build": "cd packages/api-core && bun run build && cd ../api-client && bun run build && cd ../api-orpc && bun run build && cd ../cloudflare-service && bun run build",
-    "build": "cd packages/api-core && bun run build && cd ../api-client && bun run build && cd ../api-orpc && bun run build && cd ../cloudflare-service && bun run build && cd ../../examples/cloudflare-pages-gateway-advanced && bun run build",
-    "deploy:dry-run": "cd packages/cloudflare-service && bun run deploy:dry-run && cd ../../templates/cloudflare-toss-api-service && bun run deploy:dry-run",
+    "packages:build": "cd packages/api-core && bun run build && cd ../api-client && bun run build && cd ../api-orpc && bun run build && cd ../api-cloudflare-service && bun run build",
+    "build": "cd packages/api-core && bun run build && cd ../api-client && bun run build && cd ../api-orpc && bun run build && cd ../api-cloudflare-service && bun run build && cd ../../examples/cloudflare-pages-gateway-advanced && bun run build",
+    "deploy:dry-run": "cd packages/api-cloudflare-service && bun run deploy:dry-run && cd ../../templates/cloudflare-toss-api-service && bun run deploy:dry-run",
     "check:internal-deps": "node scripts/sync-internal-dependencies.mjs --check",
     "sync:internal-deps": "node scripts/sync-internal-dependencies.mjs",
     "check": "bun run check:internal-deps && bun run typecheck && bun run test && bun run build && bun run test:packages && bun run deploy:dry-run",
