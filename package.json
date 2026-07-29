@@ -11,11 +11,13 @@
     "templates/*"
   ],
   "scripts": {
-    "typecheck": "cd packages/api-core && bun run typecheck && cd ../api-client && bun run typecheck && cd ../api-orpc && bun run typecheck && cd ../api-cloudflare-service && bun run typecheck && cd ../.. && bun run packages:build && cd templates/cloudflare-toss-api-service && bun run typecheck && cd ../../examples/cloudflare-pages-gateway-advanced && bun run typecheck",
-    "test": "bun test packages/api-core/test packages/api-client/test packages/api-orpc/test packages/api-cloudflare-service/test",
+    "typecheck:packages": "bun --filter '@ait-kit/*' typecheck",
+    "typecheck:apps": "bun run packages:build && cd templates/cloudflare-toss-api-service && bun run typecheck && cd ../../examples/cloudflare-pages-gateway-advanced && bun run typecheck",
+    "typecheck": "bun run typecheck:packages && bun run typecheck:apps",
+    "test": "bun --filter '@ait-kit/*' test",
     "test:packages": "node scripts/test-package-tarballs.mjs",
-    "packages:build": "cd packages/api-core && bun run build && cd ../api-client && bun run build && cd ../api-orpc && bun run build && cd ../api-cloudflare-service && bun run build",
-    "build": "cd packages/api-core && bun run build && cd ../api-client && bun run build && cd ../api-orpc && bun run build && cd ../api-cloudflare-service && bun run build && cd ../../examples/cloudflare-pages-gateway-advanced && bun run build",
+    "packages:build": "bun --filter '@ait-kit/*' build",
+    "build": "bun run packages:build && cd examples/cloudflare-pages-gateway-advanced && bun run build",
     "deploy:dry-run": "cd packages/api-cloudflare-service && bun run deploy:dry-run && cd ../../templates/cloudflare-toss-api-service && bun run deploy:dry-run",
     "check:internal-deps": "node scripts/sync-internal-dependencies.mjs --check",
     "sync:internal-deps": "node scripts/sync-internal-dependencies.mjs",

@@ -34,6 +34,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && bun build src/index.ts --outfile dist/index.js --format esm --target browser --packages external --external cloudflare:workers",
+    "test": "bun test test",
     "prepack": "bun run build",
     "deploy:dry-run": "wrangler deploy --dry-run --outdir .wrangler/dry-run"
   },
