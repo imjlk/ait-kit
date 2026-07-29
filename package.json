@@ -16,7 +16,7 @@
     "typecheck": "bun run typecheck:packages && bun run typecheck:apps",
     "test": "bun --filter '@ait-kit/*' test",
     "test:packages": "node scripts/test-package-tarballs.mjs",
-    "packages:build": "bun --filter '@ait-kit/*' build",
+    "packages:build": "cd packages/api-core && bun run build && cd ../.. && bun --filter '@ait-kit/api-client' --filter '@ait-kit/api-orpc' --filter '@ait-kit/api-cloudflare-service' build",
     "build": "bun run packages:build && cd examples/cloudflare-pages-gateway-advanced && bun run build",
     "deploy:dry-run": "cd packages/api-cloudflare-service && bun run deploy:dry-run && cd ../../templates/cloudflare-toss-api-service && bun run deploy:dry-run",
     "check:internal-deps": "node scripts/sync-internal-dependencies.mjs --check",
