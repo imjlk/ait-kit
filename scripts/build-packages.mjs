@@ -22,9 +22,16 @@ const manifests = readdirSync(join(rootDir, "packages"), { withFileTypes: true }
   .sort()
   .flatMap((dir) => {
     const manifestPath = join(rootDir, "packages", dir, "package.json");
-    return existsSync(manifestPath)
-      ? [{ dir, manifest: readJsonFile(manifestPath) }]
-      : [];
+    if (!existsSync(manifestPath)) return [];
+    const manifest = readJsonFile(manifestPath);
+    // Only build publishable packages, matching the publish-oidc.sh and
+    // test-package-tarballs.mjs selection criteria. Private workspaces may
+    // lack a build script or require app-only setup, so building them would
+    // fail the publish workflow for packages that are never published.
+    if (manifest.private !== true && manifest.publishConfig?.access === "public") {
+      return [{ dir, manifest }];
+    }
+    return [];
   });
 
 const byDir = new Map(manifests.map(({ dir, manifest }) => [dir, manifest]));
