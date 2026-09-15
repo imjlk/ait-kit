@@ -1,6 +1,6 @@
 {
   "name": "@ait-kit/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Frontend SDK adapters for Apps in Toss mini apps: shared contracts plus per-runtime entry points.",
   "type": "module",
   "license": "MIT",
