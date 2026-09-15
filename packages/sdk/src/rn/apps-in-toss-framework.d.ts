@@ -7,7 +7,9 @@
  */
 declare module "@apps-in-toss/framework" {
   import type { FullScreenAdSupport } from "./framework-contract.js";
+  import type { IapPlatformSdk } from "../iap/platform-contract.js";
 
   export const loadFullScreenAd: FullScreenAdSupport["loadFullScreenAd"];
   export const showFullScreenAd: FullScreenAdSupport["showFullScreenAd"];
+  export const IAP: IapPlatformSdk;
 }

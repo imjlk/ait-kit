@@ -18,7 +18,8 @@
     "toss",
     "sdk",
     "react-native",
-    "ads"
+    "ads",
+    "iap"
   ],
   "sideEffects": [
     "./src/rn/**"
@@ -32,6 +33,10 @@
     "./rn": {
       "types": "./dist/rn/index.d.ts",
       "import": "./dist/rn/index.js"
+    },
+    "./web": {
+      "types": "./dist/web/index.d.ts",
+      "import": "./dist/web/index.js"
     }
   },
   "files": [
@@ -44,10 +49,14 @@
     "prepack": "bun run build"
   },
   "peerDependencies": {
-    "@apps-in-toss/framework": "*"
+    "@apps-in-toss/framework": "*",
+    "@apps-in-toss/web-framework": "*"
   },
   "peerDependenciesMeta": {
     "@apps-in-toss/framework": {
+      "optional": true
+    },
+    "@apps-in-toss/web-framework": {
       "optional": true
     }
   },

@@ -11,11 +11,88 @@ npm install @ait-kit/sdk
 
 | Entry | Use it for |
 |---|---|
-| `@ait-kit/sdk` (root) | Runtime-neutral shared contracts: `AdShowResult`, `AdReward`, `SdkError`. Importable anywhere — plain Node, web, React Native — with no official SDK installed. |
-| `@ait-kit/sdk/rn` | React Native adapters (full-screen ads today; more domains later). Requires the official `@apps-in-toss/framework`, declared as an **optional peer** and imported lazily. |
+| `@ait-kit/sdk` (root) | Runtime-neutral shared contracts: ad + IAP types, `SdkError`. Importable anywhere — plain Node, web, React Native — with no official SDK installed. |
+| `@ait-kit/sdk/rn` | React Native adapters (full-screen ads, IAP). Requires the official `@apps-in-toss/framework`, declared as an **optional peer** and imported lazily. Never requires the web SDK. |
+| `@ait-kit/sdk/web` | Web adapters (IAP). Requires the official `@apps-in-toss/web-framework`, declared as an **optional peer** and imported lazily. Never requires the React Native SDK. |
 
-A `@ait-kit/sdk/web` entry is planned; runtime adapters always live in their
-own subpath so the root stays dependency-free.
+The two platform entries share one internal engine but keep completely
+separate SDK connections — in JavaScript and in the shipped type
+declarations — so an `/rn` consumer never installs the web package and vice
+versa.
+
+## In-app purchases (RN + Web)
+
+Both entries expose the same IAP surface; only the loader differs:
+
+```ts
+import { createReactNativeIap } from "@ait-kit/sdk/rn";   // or:
+import { createWebIap } from "@ait-kit/sdk/web";
+
+const iap = createReactNativeIap({
+  // The ONLY place product delivery happens. Resolve only after YOUR
+  // server verified the order with the provider and persisted the grant
+  // (see @ait-kit/api-core's iapOrderStatus for server-side verification).
+  grant: async ({ orderId, sku }) => {
+    await fetch("/api/iap/grant", {
+      method: "POST",
+      body: JSON.stringify({ orderId, sku })
+    });
+  }
+});
+
+// 1. Start a purchase.
+const result = await iap.purchaseOneTime("SKU_100_COINS");
+//    result.status: "completed" | "canceled" | "failed"
+//                | "grant_failed" | "unknown"
+
+// 2. Subscriptions work the same way.
+await iap.purchaseSubscription("SKU_PREMIUM", offerId);
+```
+
+`completed` requires **both** the platform's success event and your grant
+callback having resolved for the **same order**: a success event alone never
+completes a purchase, a grant for a different order ends as
+`failed`/`ORDER_MISMATCH`, and a failed server grant ends as `grant_failed`
+— never as purchase success. `unknown` (e.g. timeout) means the grant may
+still be in progress; the client timeout does not cancel it.
+
+### Duplicate grant control (client-side, scoped to one adapter)
+
+- Concurrent grants for the same order share one in-flight call.
+- A successfully granted order is reused within the adapter's scope (a
+  later recovery or duplicate success does not re-run your server call).
+- Failed grants are not cached — the next attempt retries for real.
+- This only reduces duplicate client work: **server-side grant idempotency
+  is still mandatory** (verify the order, persist exactly once).
+
+### Pending-order recovery (never automatic)
+
+```ts
+const { orders } = await iap.getPendingOrders();
+for (const order of orders) {
+  // Runs (or reuses) the server grant FIRST; the platform's
+  // completeProductGrant notification is sent only after it confirms.
+  const outcome = await iap.recoverPendingOrder(order);
+  // outcome.status: "completed" | "grant_failed" | "notify_failed"
+}
+```
+
+SDK initialization never grants or completes pending orders by itself.
+
+### Feature matrix
+
+| Capability | `/rn` | `/web` | Notes |
+|---|---|---|---|
+| Product list | ✅ | ✅ | one-time + subscription together |
+| One-time purchase | ✅ | ✅ | grant callback contract applies |
+| Subscription purchase | ✅ | ✅ | `offerId` optional; `subscriptionId` surfaced on completion |
+| Pending orders | ✅ | ✅ | recovery is consumer-driven |
+| Grant completion notify | ✅ | ✅ | sent only after server grant confirms |
+| Full-screen ads | ✅ | ➖ | ads are RN-only today |
+| Unsupported app version | `SdkError("UNSUPPORTED")` | same | per-function `isSupported` gates |
+
+Login/anonymous-key helpers and storage arrive in a later entry, as do
+notification and sharing.
 
 ## React Native full-screen ads
 
