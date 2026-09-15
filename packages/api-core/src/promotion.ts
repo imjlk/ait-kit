@@ -460,7 +460,16 @@ function resolvePromotionCode(
     }
     return request.promotionCode;
   }
-  if (options.tossPromotionCode) return options.tossPromotionCode;
+  if (options.tossPromotionCode !== undefined) {
+    // The configured fallback obeys the same rules as request values.
+    if (typeof options.tossPromotionCode !== "string" || !options.tossPromotionCode.trim()) {
+      throw clientError(
+        "INVALID_PROMOTION_CODE",
+        `configured tossPromotionCode must be a non-empty string to ${action}`
+      );
+    }
+    return options.tossPromotionCode;
+  }
   throw clientError("MISSING_PROMOTION_CODE", `promotionCode is required to ${action}`);
 }
 

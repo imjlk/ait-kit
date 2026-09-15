@@ -295,7 +295,8 @@ export type PromotionRewardPrepareResponse =
  *   the official contract documents error 4113 ("already granted/retracted")
  *   for same-key re-execution but does not guarantee idempotency.
  * - `ok: false` — the provider explicitly rejected this execute call (FAIL
- *   envelope such as 4100/4105/4108/4109/4110/4112/4113/4114, or non-2xx).
+ *   envelope such as 4100/4105/4108/4109/4110/4112/4113/4114, or a 4xx
+ *   response; 5xx responses stay UNKNOWN).
  *
  * Passing a `providerRequestId`-style identifier does not by itself make an
  * external grant idempotent.

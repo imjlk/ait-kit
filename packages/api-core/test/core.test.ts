@@ -1149,6 +1149,22 @@ describe("@ait-kit/api-core", () => {
       }
     );
 
+    test("rejects a whitespace-only configured tossPromotionCode", async () => {
+      const { api, paths } = recordingApi(
+        async () => Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } }),
+        { tossPromotionCode: "   " }
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          amount: 1000,
+          tossUserKey: "user"
+        })
+      ).rejects.toMatchObject({ code: "INVALID_PROMOTION_CODE", status: 400 });
+      expect(paths).toEqual([]);
+    });
+
     test("propagates invalid upstream URL configuration before dispatch", async () => {
       const api = createAppsInTossApiRpc(
         createAppsInTossApi({
