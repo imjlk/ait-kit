@@ -1,3 +1,4 @@
+import { verifyAnonKey } from "./anon-key";
 import { getIapOrderStatus } from "./iap";
 import { completeTossLogin, removeTossLoginByUserKey } from "./login";
 import { rawMtlsRequest } from "./mtls-client";
@@ -15,8 +16,10 @@ import type {
 export * from "./types";
 export * from "./mtls-client";
 export * from "./toss-envelope";
+export * from "./recipient";
 export * from "./login";
 export * from "./iap";
+export * from "./anon-key";
 export * from "./promotion";
 export * from "./smart-message";
 export * from "./raw";
@@ -34,6 +37,9 @@ export function createAppsInTossApi(options: AppsInTossCoreOptions = {}): AppsIn
     },
     iap: {
       orderStatus: (body) => getIapOrderStatus(body, coreOptions)
+    },
+    users: {
+      verifyAnonKey: (body) => verifyAnonKey(body, coreOptions)
     },
     promotion: {
       rewardGrant: (body) => grantPromotionReward(body, coreOptions)
@@ -53,6 +59,7 @@ export function createAppsInTossApiRpc(api: AppsInTossApi): AppsInTossApiRpc {
     tossLoginComplete: (body) => api.login.complete(body),
     tossLoginRemoveByUserKey: (body) => api.login.removeByUserKey(body),
     iapOrderStatus: (body) => api.iap.orderStatus(body),
+    verifyAnonKey: (body) => api.users.verifyAnonKey(body),
     promotionRewardGrant: (body) => api.promotion.rewardGrant(body),
     smartMessageSend: (body) => api.smartMessage.send(body),
     smartMessageBulkSend: (body) => api.smartMessage.bulkSend(body)

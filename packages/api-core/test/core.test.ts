@@ -5,7 +5,9 @@ import {
   normalizeIapOrderStatusResponse,
   normalizeMessageResponse,
   TOSS_ENDPOINTS,
-  type MtlsClient
+  type MtlsClient,
+  type SmartMessageBulkSendInput,
+  type SmartMessageSendInput
 } from "../src";
 
 describe("@ait-kit/api-core", () => {
@@ -542,9 +544,11 @@ describe("@ait-kit/api-core", () => {
 
   test("normalizes smart message bulk requests", async () => {
     const seenBodies: unknown[] = [];
+    const seenHeaders: Headers[] = [];
     const mtlsClient: MtlsClient = {
       async request(_url, init) {
         seenBodies.push(JSON.parse(String(init.body)));
+        seenHeaders.push(new Headers(init.headers));
         return Response.json({ success: { result: { msgCount: 3 } } });
       }
     };
@@ -574,13 +578,53 @@ describe("@ait-kit/api-core", () => {
         { anonKey: "anonymous", context: { name: "C" } }
       ]
     });
+    // Bulk sends carry recipients in contextList body fields, never in headers.
+    expect(seenHeaders[0].get("x-toss-user-key")).toBeNull();
+    expect(seenHeaders[0].get("x-anon-key")).toBeNull();
+  });
+
+  test.each(
+    (
+      [
+        ["no identifier", {}],
+        ["duplicate identifiers", { userKey: "u", anonKey: "a" }],
+        ["wrong anon key type", { anonKey: 42 }],
+        ["empty user key", { userKey: "" }]
+      ] as ReadonlyArray<readonly [string, Record<string, unknown>]>
+    ).flatMap(([label, recipient]) => [
+      ["forward", label, recipient],
+      ["stub", label, recipient]
+    ] as const)
+  )("rejects a bulk recipient with %s (%s)", async (mode, _label, recipient) => {
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode,
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient: {
+          async request() {
+            throw new Error("invalid recipients must not reach the transport");
+          }
+        }
+      })
+    );
+
+    const input = {
+      templateSetCode: "template",
+      contextList: [{ ...recipient, context: {} }]
+    } as unknown as SmartMessageBulkSendInput;
+    await expect(api.smartMessageBulkSend(input)).rejects.toMatchObject({
+      code: "INVALID_CONTEXT_RECIPIENT",
+      status: 400
+    });
   });
 
   test("uses the smart message user header and returns all channel counts", async () => {
     let seenHeaders = new Headers();
+    let seenBody: unknown;
     const mtlsClient: MtlsClient = {
       async request(_url, init) {
         seenHeaders = new Headers(init.headers);
+        seenBody = JSON.parse(String(init.body));
         return Response.json({
           resultType: "SUCCESS",
           success: {
@@ -616,9 +660,110 @@ describe("@ait-kit/api-core", () => {
       sentAlimtalkCount: 1,
       sentFriendtalkCount: 1
     });
-    expect(seenHeaders.get("x-user-key")).toBe("user-key");
+    expect(seenHeaders.get("x-toss-user-key")).toBe("user-key");
+    expect(seenHeaders.get("x-user-key")).toBeNull();
+    expect(seenBody).toEqual({ templateSetCode: "template", context: { name: "A" } });
+  });
+
+  test.each([
+    ["tossUserKey", { tossUserKey: "toss-user-key" }, "toss-user-key"],
+    ["userKey", { userKey: "legacy-user-key" }, "legacy-user-key"]
+  ] as const)(
+    "sends legacy %s recipients through the x-toss-user-key header",
+    async (_label, recipient, expectedHeader) => {
+      let seenHeaders = new Headers();
+      const mtlsClient: MtlsClient = {
+        async request(_url, init) {
+          seenHeaders = new Headers(init.headers);
+          return Response.json({ resultType: "SUCCESS", success: { msgCount: 1 } });
+        }
+      };
+      const api = createAppsInTossApiRpc(
+        createAppsInTossApi({
+          mode: "forward",
+          upstreamBaseUrl: "https://partner.example",
+          mtlsClient
+        })
+      );
+
+      await api.smartMessageSend({
+        ...recipient,
+        templateSetCode: "template",
+        context: {}
+      });
+
+      expect(seenHeaders.get("x-toss-user-key")).toBe(expectedHeader);
+      expect(seenHeaders.get("x-user-key")).toBeNull();
+    }
+  );
+
+  test("passes anonymous keys to the x-anon-key header byte-for-byte", async () => {
+    let seenHeaders = new Headers();
+    const mtlsClient: MtlsClient = {
+      async request(_url, init) {
+        seenHeaders = new Headers(init.headers);
+        return Response.json({ resultType: "SUCCESS", success: { msgCount: 1 } });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    // Callers that store prefixed identifiers must pass the raw SDK hash;
+    // the kit never adds or strips prefixes in transit.
+    await api.smartMessageSend({
+      anonKey: "anon:stored-hash-value",
+      templateSetCode: "template",
+      context: {}
+    });
+
+    expect(seenHeaders.get("x-anon-key")).toBe("anon:stored-hash-value");
     expect(seenHeaders.get("x-toss-user-key")).toBeNull();
   });
+
+  const INVALID_SINGLE_RECIPIENTS: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+    ["no identifier", {}],
+    ["duplicate identifiers", { userKey: "u", tossUserKey: "t" }],
+    ["user and anonymous identifiers", { userKey: "u", anonKey: "a" }],
+    ["wrong user key type", { userKey: true }],
+    ["empty user key", { userKey: "  " }],
+    ["wrong anon key type", { anonKey: 42 }],
+    ["empty anon key", { anonKey: "" }]
+  ];
+
+  test.each(INVALID_SINGLE_RECIPIENTS.flatMap(([label, recipient]) => [
+    ["forward", label, recipient],
+    ["stub", label, recipient]
+  ] as const))(
+    "rejects a single message recipient with %s (%s)",
+    async (mode, _label, recipient) => {
+      const api = createAppsInTossApiRpc(
+        createAppsInTossApi({
+          mode,
+          upstreamBaseUrl: "https://partner.example",
+          mtlsClient: {
+            async request() {
+              throw new Error("invalid recipients must not reach the transport");
+            }
+          }
+        })
+      );
+
+      const input = {
+        ...recipient,
+        templateSetCode: "template",
+        context: {}
+      } as unknown as SmartMessageSendInput;
+      await expect(api.smartMessageSend(input)).rejects.toMatchObject({
+        code: "INVALID_MESSAGE_RECIPIENT",
+        status: 400
+      });
+    }
+  );
 
   test("normalizes the documented smart message failure reason", async () => {
     let seenHeaders = new Headers();
@@ -742,5 +887,187 @@ describe("@ait-kit/api-core", () => {
       "https://partner.example/anything",
       "https://partner.example/anything"
     ]);
+  });
+
+  function forwardApi(handler: MtlsClient["request"], options: Record<string, unknown> = {}) {
+    const mtlsClient: MtlsClient = { request: handler };
+    return createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient,
+        ...options
+      })
+    );
+  }
+
+  test("verifies a valid anonymous key with the x-anon-key header", async () => {
+    const calls: Array<{ headers: Headers; init: RequestInit }> = [];
+    const api = forwardApi(async (_url, init) => {
+      calls.push({ headers: new Headers(init.headers), init });
+      return Response.json({ resultType: "SUCCESS", success: true });
+    });
+
+    const response = await api.verifyAnonKey({ anonKey: "anon:stored-hash-value" });
+
+    expect(response).toEqual({ ok: true, valid: true });
+    expect(calls[0].headers.get("x-anon-key")).toBe("anon:stored-hash-value");
+    expect(calls[0].init.body).toBeUndefined();
+  });
+
+  test("returns a definitive invalid verdict for rejected anonymous keys", async () => {
+    const api = forwardApi(async () =>
+      Response.json({ resultType: "SUCCESS", success: false })
+    );
+
+    const response = await api.verifyAnonKey({ anonKey: "revoked-hash" });
+
+    expect(response).toEqual({ ok: true, valid: false });
+  });
+
+  test("distinguishes a missing auth context from an invalid key", async () => {
+    const api = forwardApi(async () =>
+      Response.json({
+        resultType: "FAIL",
+        error: { errorCode: "4010", reason: "인증 정보를 찾을 수 없어요." }
+      })
+    );
+
+    const response = await api.verifyAnonKey({ anonKey: "unknown-hash" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "ERROR",
+      providerErrorCode: "4010"
+    });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test("reports verification service failures without an invalid verdict", async () => {
+    const api = forwardApi(async () =>
+      Response.json({ message: "verify service unavailable" }, { status: 503 })
+    );
+
+    const response = await api.verifyAnonKey({ anonKey: "any-hash" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "ERROR",
+      upstreamStatus: 503
+    });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test("treats a 200 timeout envelope as unverifiable", async () => {
+    const api = forwardApi(async () =>
+      Response.json({
+        resultType: "HTTP_TIMEOUT",
+        error: { errorCode: "5000", reason: "upstream timeout" }
+      })
+    );
+
+    const response = await api.verifyAnonKey({ anonKey: "any-hash" });
+
+    expect(response).toMatchObject({ ok: false, providerErrorCode: "5000" });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test("treats a malformed verdict as unverifiable", async () => {
+    const api = forwardApi(async () =>
+      Response.json({ resultType: "SUCCESS", success: "yes" })
+    );
+
+    const response = await api.verifyAnonKey({ anonKey: "any-hash" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "INVALID_RESPONSE",
+      providerStatus: "ERROR"
+    });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test("rejects a bare boolean without a SUCCESS envelope", async () => {
+    const api = forwardApi(async () => Response.json({ success: false }));
+
+    const response = await api.verifyAnonKey({ anonKey: "any-hash" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "INVALID_RESPONSE",
+      failureReason: "verify response was not a SUCCESS envelope"
+    });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test("converts transport rejections into no-verdict failures", async () => {
+    const api = forwardApi(async () => {
+      throw new Error("connection reset");
+    });
+
+    const response = await api.verifyAnonKey({ anonKey: "any-hash" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "UPSTREAM_UNAVAILABLE",
+      providerStatus: "ERROR",
+      failureReason: "anonymous key verification request failed: connection reset"
+    });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test.each([
+    ["a malformed anon key next to a valid user key", { userKey: "u", anonKey: 42 }],
+    ["an empty toss user key next to a valid user key", { userKey: "u", tossUserKey: "" }],
+    ["a malformed user key next to a valid anon key", { userKey: true, anonKey: "a" }]
+  ] as const)(
+    "rejects %s instead of discarding the malformed identifier",
+    async (_label, recipient) => {
+      const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "forward" }));
+
+      const input = {
+        ...recipient,
+        templateSetCode: "template",
+        context: {}
+      } as unknown as SmartMessageSendInput;
+      await expect(api.smartMessageSend(input)).rejects.toMatchObject({
+        code: "INVALID_MESSAGE_RECIPIENT",
+        status: 400
+      });
+    }
+  );
+
+  test.each(["forward", "stub"] as const)("requires an anonymous key in %s mode", async (mode) => {
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode,
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient: {
+          async request() {
+            throw new Error("missing keys must not reach the transport");
+          }
+        }
+      })
+    );
+
+    await expect(api.verifyAnonKey({})).resolves.toMatchObject({
+      ok: false,
+      error: "MISSING_ANON_KEY",
+      providerStatus: "ERROR"
+    });
+    await expect(api.verifyAnonKey({ anonKey: "   " })).resolves.toMatchObject({
+      ok: false,
+      error: "MISSING_ANON_KEY"
+    });
+  });
+
+  test("marks stub verification output as synthetic", async () => {
+    const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub" }));
+
+    await expect(api.verifyAnonKey({ anonKey: "anon-hash" })).resolves.toEqual({
+      ok: true,
+      valid: true,
+      stub: true
+    });
   });
 });

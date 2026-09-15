@@ -50,6 +50,8 @@ function resolvePostHandler(pathname: string, rpc: AppsInTossApiRpc) {
       return (body: Parameters<AppsInTossApiRpc["tossLoginRemoveByUserKey"]>[0]) => rpc.tossLoginRemoveByUserKey(body);
     case "/internal/apps-in-toss/iap/order/status":
       return (body: Parameters<AppsInTossApiRpc["iapOrderStatus"]>[0]) => rpc.iapOrderStatus(body);
+    case "/internal/apps-in-toss/users/anon-key/verify":
+      return (body: Parameters<AppsInTossApiRpc["verifyAnonKey"]>[0]) => rpc.verifyAnonKey(body);
     case "/internal/apps-in-toss/promotion/reward/grant":
       return (body: Parameters<AppsInTossApiRpc["promotionRewardGrant"]>[0]) => rpc.promotionRewardGrant(body);
     case "/internal/apps-in-toss/smart-message/send":

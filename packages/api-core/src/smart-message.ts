@@ -1,4 +1,5 @@
 import { requestToss } from "./mtls-client";
+import { normalizeMessageRecipient, type MessageRecipient } from "./recipient";
 import {
   clientError,
   httpStatusOk,
@@ -26,6 +27,11 @@ export async function sendSmartMessage(
   options: NormalizedAppsInTossCoreOptions
 ): Promise<SmartMessageResponse> {
   const request = objectOrSelf(body, {});
+  // Validate the recipient and template for stub callers too, so bad input is
+  // rejected identically regardless of mode (bulk sends already behaved this
+  // way by building their upstream body before the stub branch).
+  const upstreamBody = messageUpstreamBody(request);
+  const headers = messageRecipientHeaders(request);
   if (options.mode !== "forward") {
     return stubSmartMessageResponse(request, 1, options.now);
   }
@@ -33,8 +39,8 @@ export async function sendSmartMessage(
     {
       method: "POST",
       path: TOSS_ENDPOINTS.messageSend,
-      body: messageUpstreamBody(request),
-      headers: messageRecipientHeaders(request)
+      body: upstreamBody,
+      headers
     },
     options
   );
@@ -90,13 +96,13 @@ export function bulkMessageUpstreamBody(body: Record<string, unknown>) {
     templateSetCode,
     contextList: body.contextList.map((entry, index) => {
       const item = objectOrSelf(entry, {});
-      const recipient = messageRecipient(
+      const recipient = normalizeMessageRecipient(
         item,
         "INVALID_CONTEXT_RECIPIENT",
-        `contextList[${index}] must include exactly one of userKey, tossUserKey, or anonKey`
+        `contextList[${index}] recipient`
       );
       return {
-        ...recipient,
+        ...recipientContextFields(recipient),
         context: messageContext(item.context, `contextList[${index}].context`)
       };
     })
@@ -238,38 +244,28 @@ function stubSmartMessageResponse(body: unknown, msgCount: number, now: () => nu
   };
 }
 
+/**
+ * Per-API recipient conversion for single (and test) message sends: the
+ * official API carries the recipient in the `x-toss-user-key` or `x-anon-key`
+ * request header — never in the body. Values pass through byte-for-byte.
+ */
 function messageRecipientHeaders(body: Record<string, unknown>): Record<string, string> {
-  const recipient = messageRecipient(
-    body,
-    "INVALID_MESSAGE_RECIPIENT",
-    "exactly one of userKey, tossUserKey, or anonKey is required"
-  );
-  return "userKey" in recipient
-    ? { "x-user-key": String(recipient.userKey) }
+  const recipient = normalizeMessageRecipient(body, "INVALID_MESSAGE_RECIPIENT", "message recipient");
+  return recipientHeaders(recipient);
+}
+
+function recipientHeaders(recipient: MessageRecipient): Record<string, string> {
+  return recipient.kind === "user"
+    ? { "x-toss-user-key": String(recipient.userKey) }
     : { "x-anon-key": recipient.anonKey };
 }
 
-function messageRecipient(
-  body: Record<string, unknown>,
-  errorCode: string,
-  errorMessage: string
-): { userKey: string | number } | { anonKey: string } {
-  const userKey = messageRecipientValue(body.userKey);
-  const tossUserKey = messageRecipientValue(body.tossUserKey);
-  const anonKey = typeof body.anonKey === "string" ? stringOrUndefined(body.anonKey) : undefined;
-  if (userKey !== undefined && tossUserKey === undefined && anonKey === undefined) return { userKey };
-  if (tossUserKey !== undefined && userKey === undefined && anonKey === undefined) {
-    return { userKey: tossUserKey };
-  }
-  if (anonKey !== undefined && userKey === undefined && tossUserKey === undefined) return { anonKey };
-  throw clientError(errorCode, errorMessage);
-}
-
-function messageRecipientValue(value: unknown): string | number | undefined {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : undefined;
-  }
-  return typeof value === "string" ? stringOrUndefined(value) : undefined;
+/**
+ * Per-API recipient conversion for bulk sends: recipients ride in each
+ * `contextList` item's body fields (`userKey` or `anonKey`), not in headers.
+ */
+function recipientContextFields(recipient: MessageRecipient): Record<string, string | number> {
+  return recipient.kind === "user" ? { userKey: recipient.userKey } : { anonKey: recipient.anonKey };
 }
 
 function messageContext(value: unknown, name: string) {
