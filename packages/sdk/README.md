@@ -99,7 +99,7 @@ SDK initialization never grants or completes pending orders by itself.
 | Grant completion notify | ✅ | ✅ | sent only after server grant confirms |
 | Full-screen ads | ✅ | ➖ | ads are RN-only today |
 | Notification agreement | ✅ | ✅ | event-based, one template per request |
-| Share link / share sheet | ✅ | ✅ | `intoss://` paths; `closed` ≠ shared |
+| Share link / share sheet | ✅ | ✅ | `intoss://` paths; `completed` ≠ shared |
 | Unsupported app version | `SdkError("UNSUPPORTED")` | same | per-function `isSupported` gates |
 
 Notification and sharing adapters ship in both entries (see below).
@@ -171,10 +171,10 @@ const result = await notification.requestAgreement("TEMPLATE_CODE");
 const share = createReactNativeShare();
 const link = await share.createLink("intoss://my-app/about", "https://cdn/og.png");
 
-// 3. Share sheet: "closed" means the sheet flow ended — nothing more.
+// 3. Share sheet: "completed" means the SDK share call finished — nothing more.
 const uiResult = await share.sendMessage(`check this out ${link}`);
-// uiResult.status: "closed" | "failed" — closed does NOT prove the user
-// shared and never grants share-reward eligibility.
+// uiResult.status: "completed" | "failed" — completed does NOT prove the
+// user shared and never grants share-reward eligibility.
 ```
 
 Contracts:
@@ -186,8 +186,10 @@ Contracts:
 - **Share links** validate the documented `intoss://` path contract
   (`INVALID_SHARE_PATH` otherwise) and pass the resolved link through
   verbatim. OG image generation is the consumer's concern.
-- **Share sheet** resolution is `closed`, not "completed" — reward grants
-  and completion tracking stay with the consumer.
+- **Share sheet** resolution is `completed`, meaning ONLY that the SDK share
+  call finished — the underlying SDKs do not report whether the sheet opened,
+  closed, or the user actually shared. Reward grants and completion tracking
+  stay with the consumer. (Renamed from `closed` in 0.3.0; see Migrating.)
 - Unsupported surfaces/app versions reject with `SdkError("UNSUPPORTED")`.
 
 ## React Native full-screen ads
@@ -234,3 +236,40 @@ notification and sharing.)
 
 `@ait-kit/sdk` is versioned independently from the server API packages
 (`@ait-kit/api-*`), which release in lockstep with each other.
+
+## Verified official SDK versions
+
+The adapters are developed and continuously checked against these exact
+official releases (see `scripts/test-package-tarballs.mjs`):
+
+| Official package | Verified version | Peer range |
+|---|---|---|
+| `@apps-in-toss/framework` (RN) | 2.10.10 | `>=2.10.10` |
+| `@apps-in-toss/web-framework` (Web) | 3.4.0 | `>=3.4.0` |
+
+Older versions may work where the runtime surfaces match (every capability
+is checked per function and missing ones reject with `UNSUPPORTED`), but
+only the versions above are verified. Newer versions are expected to work
+via the same structural checks; if an official export shape changes, the
+per-operation errors surface it instead of silent misbehavior.
+
+## Migrating
+
+### 0.3.0 — share sheet result `closed` → `completed`
+
+`sendMessage` now resolves `{ status: "completed" }` instead of
+`{ status: "closed" }`. The meaning also got precise: `completed` states
+only that the SDK share **call** finished. It does not prove the share
+sheet opened or closed, that the user shared, or that any reward
+eligibility was earned. Update any `status === "closed"` checks; failure
+results (`status: "failed"` with `code`/`reason`) are unchanged.
+
+### 0.3.0 — RN adapters call the official export shapes
+
+The React Native default loaders now convert the official flat exports
+(`appLogin`, `getAnonymousKey`, `requestNotificationAgreement`,
+`getTossShareLink`, `share`) into the shared adapter contracts. Previously
+a correctly installed official RN SDK still produced
+`SdkError("UNSUPPORTED")` for these five capabilities because the loaders
+looked for the web SDK's namespaced shapes. Custom `framework` injections
+using the internal namespaced contract or a loader keep working unchanged.

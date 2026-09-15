@@ -72,7 +72,9 @@ function createDefaultRnStorageLoader(): StoragePlatformLoader {
       return { available: true, module: cached };
     }
     try {
-      const framework = (await import("@apps-in-toss/framework")) as StoragePlatformSdk;
+      // The official RN SDK exposes Storage under the same namespaced shape
+      // as the shared contract, so no conversion is needed.
+      const framework: StoragePlatformSdk = await import("@apps-in-toss/framework");
       cached = framework;
       return { available: true, module: cached };
     } catch (error) {

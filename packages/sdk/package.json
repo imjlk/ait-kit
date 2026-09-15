@@ -49,8 +49,8 @@
     "prepack": "bun run build"
   },
   "peerDependencies": {
-    "@apps-in-toss/framework": "*",
-    "@apps-in-toss/web-framework": "*"
+    "@apps-in-toss/framework": ">=2.10.10",
+    "@apps-in-toss/web-framework": ">=3.4.0"
   },
   "peerDependenciesMeta": {
     "@apps-in-toss/framework": {

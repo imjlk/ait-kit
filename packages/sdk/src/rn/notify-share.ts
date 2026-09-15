@@ -14,6 +14,7 @@ import {
   runShareUi,
   validateSharePath
 } from "../share/platform-contract.js";
+import { adaptOfficialRnNotification, adaptOfficialRnShare } from "./official-module.js";
 
 const DEFAULT_AGREEMENT_TIMEOUT_MS = 60_000;
 
@@ -73,9 +74,9 @@ export interface ReactNativeShare {
   /** Creates a share link for an `intoss://` deeplink path. */
   createLink(path: string, ogImageUrl?: string): Promise<string>;
   /**
-   * Opens the native share sheet. Resolving `closed` means the sheet flow
-   * ended — it does not prove the user shared and never grants reward
-   * eligibility.
+   * Opens the native share sheet. Resolving `completed` means the SDK share
+   * call finished — it does not prove the user shared (or even saw the
+   * sheet) and never grants reward eligibility.
    */
   sendMessage(message: string): Promise<SdkShareUiResult>;
 }
@@ -133,7 +134,7 @@ export function normalizeNotificationLoader(
   framework: ReactNativeNotificationOptions["framework"]
 ): NotificationPlatformLoader {
   if (!framework) {
-    return createDefaultRnModuleLoader<NotificationPlatformSdk>();
+    return createDefaultRnNotificationLoader();
   }
   if (typeof framework === "function") {
     return framework;
@@ -145,7 +146,7 @@ export function normalizeShareLoader(
   framework: ReactNativeShareOptions["framework"]
 ): SharePlatformLoader {
   if (!framework) {
-    return createDefaultRnModuleLoader<SharePlatformSdk>();
+    return createDefaultRnShareLoader();
   }
   if (typeof framework === "function") {
     return framework;
@@ -153,17 +154,39 @@ export function normalizeShareLoader(
   return async () => ({ available: true, module: framework });
 }
 
-function createDefaultRnModuleLoader<T>(): () => Promise<
-  { available: true; module: T } | { available: false; reason: string }
-> {
-  let cached: T | undefined;
+/**
+ * Default loaders: import the official `@apps-in-toss/framework` lazily and
+ * convert its flat export surface (`requestNotificationAgreement`,
+ * `getTossShareLink`, `share`) to the shared contracts. Failed imports are
+ * never cached; successful loads cache the converted module.
+ */
+function createDefaultRnNotificationLoader(): NotificationPlatformLoader {
+  let cached: NotificationPlatformSdk | undefined;
   return async () => {
     if (cached) {
       return { available: true, module: cached };
     }
     try {
-      const framework = (await import("@apps-in-toss/framework")) as T;
-      cached = framework;
+      cached = adaptOfficialRnNotification(await import("@apps-in-toss/framework"));
+      return { available: true, module: cached };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        available: false,
+        reason: `failed to import @apps-in-toss/framework: ${message}`
+      };
+    }
+  };
+}
+
+function createDefaultRnShareLoader(): SharePlatformLoader {
+  let cached: SharePlatformSdk | undefined;
+  return async () => {
+    if (cached) {
+      return { available: true, module: cached };
+    }
+    try {
+      cached = adaptOfficialRnShare(await import("@apps-in-toss/framework"));
       return { available: true, module: cached };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
