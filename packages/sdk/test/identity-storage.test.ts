@@ -102,6 +102,7 @@ describe("@ait-kit/sdk identity adapters", () => {
     ["an undefined result", undefined],
     ["an ERROR sentinel", "ERROR"],
     ["a HASH type with an empty hash", { type: "HASH", hash: "" }],
+    ["a HASH type with a whitespace-only hash", { type: "HASH", hash: "   " }],
     ["a HASH type with a non-string hash", { type: "HASH", hash: 42 }],
     ["a non-HASH type", { type: "OTHER", hash: "abc" }]
   ] as const)("rejects an anonymous key result that is %s", async (_label, result) => {
@@ -188,6 +189,27 @@ describe("@ait-kit/sdk storage adapters", () => {
       name: "SdkError",
       message: expect.stringContaining("Storage get/set/remove")
     });
+  });
+
+  test("concurrent initial storage calls share one loader invocation", async () => {
+    let loaderCalls = 0;
+    const seen: string[] = [];
+    const storage = createReactNativeStorage({
+      framework: async () => {
+        loaderCalls += 1;
+        const platform = fakeStoragePlatform();
+        // Distinguish stores per call so aliasing would be observable.
+        await platform.Storage.setItem("marker", `store-${loaderCalls}`);
+        seen.push(`store-${loaderCalls}`);
+        return { available: true, module: platform };
+      }
+    });
+
+    const [a, b] = await Promise.all([storage.get("marker"), storage.get("marker")]);
+    expect(loaderCalls).toBe(1);
+    expect(seen).toEqual(["store-1"]);
+    expect(a).toBe("store-1");
+    expect(b).toBe("store-1");
   });
 
   test("web storage works with an injected module", async () => {

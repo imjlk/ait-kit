@@ -24,16 +24,27 @@ export function createReactNativeStorage(
 ): SdkStorage {
   const loader = normalizeStorageLoader(options.framework);
   let cached: SdkStorage | undefined;
-  const resolve = async (): Promise<SdkStorage> => {
+  let resolving: Promise<SdkStorage> | undefined;
+  const resolve = (): Promise<SdkStorage> => {
     if (cached) {
-      return cached;
+      return Promise.resolve(cached);
     }
-    const result = await loader();
-    if (!result.available) {
-      throw new SdkError("SDK_UNAVAILABLE", result.reason);
+    // Concurrent initial calls share one loader invocation so custom
+    // loaders cannot hand out independent stores.
+    if (!resolving) {
+      resolving = (async () => {
+        const result = await loader();
+        if (!result.available) {
+          throw new SdkError("SDK_UNAVAILABLE", result.reason);
+        }
+        cached = createSdkStorageFromPlatform(result.module);
+        return cached;
+      })();
+      resolving.catch(() => {
+        resolving = undefined;
+      });
     }
-    cached = createSdkStorageFromPlatform(result.module);
-    return cached;
+    return resolving;
   };
   return {
     get: async (key) => (await resolve()).get(key),

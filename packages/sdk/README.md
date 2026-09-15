@@ -100,8 +100,7 @@ SDK initialization never grants or completes pending orders by itself.
 | Full-screen ads | ✅ | ➖ | ads are RN-only today |
 | Unsupported app version | `SdkError("UNSUPPORTED")` | same | per-function `isSupported` gates |
 
-Login/anonymous-key helpers and storage arrive in a later entry, as do
-notification and sharing.
+Notification and sharing arrive in a later entry.
 
 ## Login, anonymous identity, and storage (RN + Web)
 

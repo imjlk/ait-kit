@@ -99,10 +99,10 @@ export async function runSdkGetAnonymousKey(
     typeof result === "object" && result !== null
       ? (result as { type?: unknown }).type
       : undefined;
-  if (type !== "HASH" || typeof hash !== "string" || !hash) {
+  if (type !== "HASH" || typeof hash !== "string" || !hash.trim()) {
     throw new SdkError(
       "INVALID_ANONYMOUS_KEY",
-      `anonymous key result was not { type: "HASH", hash }: received ${describe(result)}`
+      `anonymous key result was not { type: "HASH", hash } with a non-blank hash: received ${describe(result)}`
     );
   }
   return { type: "HASH", hash };
