@@ -173,9 +173,25 @@ publish_package() {
   fi
 
   rm -f "$publish_log"
+
+  if grep -qiE "404|not found" "$publish_log" 2>/dev/null; then
+    echo "HINT: ${package_name} is not published yet and npm Trusted Publishing may not be configured for it." >&2
+    echo "HINT: register a pending trusted publisher for ${package_name} (repository imjlk/ait-kit, workflow publish.yml) at https://www.npmjs.com/settings/~/trusted-publishers, then retry." >&2
+  fi
+
   return 1
 }
 
+failed_packages=()
+
 for package_path in "${PACKAGES[@]}"; do
-  publish_package "${ROOT_DIR}/${package_path}"
+  if ! publish_package "${ROOT_DIR}/${package_path}"; then
+    failed_packages+=("${package_path}")
+    echo "WARNING: publishing failed for ${package_path}; continuing with the remaining packages." >&2
+  fi
 done
+
+if [[ ${#failed_packages[@]} -gt 0 ]]; then
+  echo "Publishing failed for ${failed_packages[*]}." >&2
+  exit 1
+fi

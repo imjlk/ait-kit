@@ -57,9 +57,12 @@ Public npm packages are managed by Sampo:
 Use `sampo add` for user-facing changes, then let the GitHub release workflow
 prepare release PRs. Publishing is handled by `.github/workflows/publish.yml`
 and `scripts/publish-oidc.sh`, which use Bun for builds and npm CLI for OIDC
-Trusted Publishing. Configure npm Trusted Publishing for
-`.github/workflows/publish.yml`, and install Sampo's GitHub App for PR changeset
-reminders: https://github.com/apps/sampo-s-bot.
+Trusted Publishing. Register a **pending trusted publisher on npmjs.com for
+every new public package name** (repository `imjlk/ait-kit`, workflow
+`publish.yml`, no environment) before its first release — a package without a
+trusted publisher fails with `E404` even though the workflow is correct.
+Install Sampo's GitHub App for PR changeset reminders:
+https://github.com/apps/sampo-s-bot.
 
 Store a fine-grained GitHub token with repository Contents, Pull requests, and
 Issues write access as the Actions secret `SAMPO_RELEASE_TOKEN`. The release
