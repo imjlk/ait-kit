@@ -67,7 +67,7 @@ interface AdDeadline {
   race<T>(promise: Promise<T>): Promise<T | undefined>;
 }
 
-function createAdDeadline(timeoutMs: number, now: () => number = Date.now): AdDeadline {
+function createAdDeadline(timeoutMs: number, now: () => number = monotonicNow): AdDeadline {
   if (!(timeoutMs > 0)) {
     return { remainingMs: () => undefined, race: (promise) => promise };
   }
@@ -92,6 +92,16 @@ function createAdDeadline(timeoutMs: number, now: () => number = Date.now): AdDe
         );
       })
   };
+}
+
+/**
+ * Monotonic elapsed time: a system wall-clock correction while the loader
+ * is pending must not shrink or stretch the remaining budget.
+ */
+function monotonicNow(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
 }
 
 /**

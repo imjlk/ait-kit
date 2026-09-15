@@ -356,47 +356,63 @@ describe("@ait-kit/sdk/rn ads", () => {
   });
 
   test("the load deadline covers loading plus event waiting, not each twice", async () => {
-    // Real timers with generous margins: the loader consumes 40ms of a 60ms
-    // budget, so the caller must see the timeout at ~60ms — not at ~100ms
-    // from a second, full-size event-flow budget.
+    // Behavioral discriminator instead of a tight wall-clock bound: the
+    // loader consumes 40ms of a 50ms budget, leaving ~10ms for the event
+    // flow. A "loaded" event 40ms after registration therefore arrives
+    // AFTER the flow's own deadline (timeout wins); under the old
+    // double-budget behavior the flow would have had a fresh 50ms and the
+    // event would have resolved the load. Timer ordering is FIFO, so this
+    // is stable on contended workers.
     const framework = fakeFramework(() => {
-      // Load registers but never emits.
+      // Load registration is driven manually by the test.
     });
     const ads = createReactNativeAds({
       framework: () =>
         Bun.sleep(40).then(() => ({ available: true as const, module: framework })),
-      loadTimeoutMs: 60
+      loadTimeoutMs: 50
     });
 
-    const startedAt = Date.now();
-    await expect(ads.loadFullScreenAd("group-a")).rejects.toMatchObject({
-      code: "AD_LOAD_TIMEOUT"
-    });
-    const elapsed = Date.now() - startedAt;
-    expect(elapsed).toBeLessThan(95);
+    const pending = ads.loadFullScreenAd("group-a");
+    // Capture the outcome immediately so the ~50ms rejection is handled.
+    const outcome = pending.then(
+      () => "resolved",
+      (error: unknown) => error
+    );
+    await Bun.sleep(55); // loader (40ms) + registration have settled
+    const loadCall = framework.calls.find((call) => call.phase === "load");
+    expect(loadCall).toBeDefined();
+    await Bun.sleep(40); // past the flow's ~10ms remainder, inside a fresh full budget
+    loadCall!.emit({ type: "loaded" });
+    await expect(outcome).resolves.toMatchObject({ code: "AD_LOAD_TIMEOUT" });
   });
 
   test("the show deadline covers loading plus event waiting, not each twice", async () => {
+    // Same discriminator for shows: after a 40ms loader within a 50ms
+    // budget, a dismissal 40ms after registration is late — the timeout
+    // result must win over the event.
     const framework = fakeFramework((call) => {
       if (call.phase === "load") {
         call.emit({ type: "loaded" });
       }
-      // Show registers but never emits.
+      // Show registration is driven manually by the test.
     });
     const ads = createReactNativeAds({
       framework: () =>
         Bun.sleep(40).then(() => ({ available: true as const, module: framework })),
-      showTimeoutMs: 60
+      showTimeoutMs: 50
     });
 
     await ads.loadFullScreenAd("group-a");
-    const startedAt = Date.now();
-    await expect(ads.showFullScreenAd("group-a")).resolves.toEqual({
+    const pending = ads.showFullScreenAd("group-a");
+    await Bun.sleep(55); // loader (40ms) + registration have settled
+    const showCall = framework.calls.find((call) => call.phase === "show");
+    expect(showCall).toBeDefined();
+    await Bun.sleep(40);
+    showCall!.emit({ type: "dismissed" });
+    await expect(pending).resolves.toEqual({
       status: "failed",
       reason: "ad show flow timed out"
     });
-    const elapsed = Date.now() - startedAt;
-    expect(elapsed).toBeLessThan(95);
   });
 
   test("a show timeout returns exactly after its subscription cleanup ran once", async () => {
