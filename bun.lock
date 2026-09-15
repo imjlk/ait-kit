@@ -15,8 +15,8 @@
       "name": "cloudflare-pages-gateway-advanced-example",
       "version": "0.1.0",
       "dependencies": {
-        "@ait-kit/api-core": "0.2.0",
-        "@ait-kit/api-orpc": "0.2.0",
+        "@ait-kit/api-core": "0.4.0",
+        "@ait-kit/api-orpc": "0.4.0",
         "@orpc/server": "1.15.0",
         "zod": "4.6.5",
       },
@@ -29,16 +29,16 @@
     },
     "packages/api-client": {
       "name": "@ait-kit/api-client",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
-        "@ait-kit/api-core": "0.2.0",
+        "@ait-kit/api-core": "0.4.0",
       },
     },
     "packages/api-cloudflare-service": {
       "name": "@ait-kit/api-cloudflare-service",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
-        "@ait-kit/api-core": "0.2.0",
+        "@ait-kit/api-core": "0.4.0",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "5.20260915.1",
@@ -48,20 +48,20 @@
     },
     "packages/api-core": {
       "name": "@ait-kit/api-core",
-      "version": "0.3.0",
+      "version": "0.4.0",
     },
     "packages/api-orpc": {
       "name": "@ait-kit/api-orpc",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
-        "@ait-kit/api-core": "0.2.0",
+        "@ait-kit/api-core": "0.4.0",
         "@orpc/server": "1.15.0",
         "zod": "4.6.5",
       },
     },
     "packages/sdk": {
       "name": "@ait-kit/sdk",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "peerDependencies": {
         "@apps-in-toss/framework": ">=2.10.10",
         "@apps-in-toss/web-framework": ">=3.4.0",
@@ -75,8 +75,8 @@
       "name": "cloudflare-toss-api-service-template",
       "version": "0.1.0",
       "dependencies": {
-        "@ait-kit/api-cloudflare-service": "0.2.0",
-        "@ait-kit/api-core": "0.2.0",
+        "@ait-kit/api-cloudflare-service": "0.4.0",
+        "@ait-kit/api-core": "0.4.0",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "5.20260915.1",
