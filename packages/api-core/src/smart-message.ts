@@ -221,8 +221,9 @@ export function normalizeMessageResponse(
     // A provider-emitted failure status alongside a SUCCESS envelope is the
     // provider contradicting itself: the stated failure wins, exactly as it
     // did before envelope classification existed (messageStatusOk treated
-    // this same set — FAILED, FAIL, ERROR, REJECTED — as failures).
-    const statedStatus = readStrictStringState(upstream, ["providerStatus"]);
+    // this same set — FAILED, FAIL, ERROR, REJECTED — as failures). Both
+    // normalized aliases (providerStatus and status) are honored.
+    const statedStatus = readStrictStringState(upstream, ["providerStatus", "status"]);
     if (
       envelopeResultType.value === "SUCCESS" &&
       statedStatus.state === "present" &&
@@ -347,10 +348,20 @@ export function normalizeMessageResponse(
     "data.success"
   ]);
   const result = objectOrSelf(nestedResult, {});
-  const countsSource =
-    nestedResult !== undefined || !hasTopLevelSendEvidence(upstreamObject)
-      ? result
-      : upstreamObject;
+  // Evidence must live in ONE place: a nested result object alongside
+  // top-level count/failure evidence is a malformed hybrid, and picking
+  // either source optimistically could confirm delivery or hide failures.
+  if (nestedResult !== undefined && hasTopLevelSendEvidence(upstreamObject)) {
+    return unknownMessageResult(
+      providerRequestId,
+      "send-result evidence appeared both nested and at the top level",
+      upstreamStatus,
+      resultType,
+      undefined,
+      sentAtWithoutNow
+    );
+  }
+  const countsSource = nestedResult !== undefined ? result : upstreamObject;
 
   const countReads = {
     msgCount: readStrictNonNegativeIntState(countsSource, ["msgCount"]),

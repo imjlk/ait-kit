@@ -2080,6 +2080,31 @@ describe("smart message send-result evidence validation", () => {
     expect(response).not.toMatchObject({ ok: true });
   });
 
+  test("a status-alias failure next to a SUCCESS envelope still fails", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { status: "FAILED", resultType: "SUCCESS", success: { msgCount: 1 } }
+    );
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "FAILED" });
+    expect(response).not.toMatchObject({ ok: true });
+  });
+
+  test("nested results with top-level failure evidence are malformed hybrids", () => {
+    const response = normalizeMessageResponse({}, {
+      resultType: "SUCCESS",
+      result: { msgCount: 0 },
+      fail: { sentSms: [{ reachedFailReason: "phone off" }] }
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE",
+      failureReason: expect.stringContaining("both nested and at the top level")
+    });
+  });
+
   test("unknown results keep correlation info but never fabricate a sentAt", () => {
     const response = normalizeMessageResponse(
       { providerRequestId: "req-9" },
