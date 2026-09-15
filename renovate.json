@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Asia/Seoul",
+  "schedule": ["after 9am and before 6pm on Monday"],
+  "rangeStrategy": "replace",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+  "packageRules": [
+    {
+      "description": "Internal @ait-kit/* pins are rewritten by the Sampo release workflow (sync-internal-deps), so Renovate must never propose updates for them.",
+      "matchPackagePatterns": ["^@ait-kit/"],
+      "enabled": false
+    },
+    {
+      "description": "Bun version changes affect the lockfile format and pinned versions in GitHub workflows, and @types/bun must move in lockstep with the manually pinned runtime so typechecking cannot see APIs the runtime lacks; manage both manually.",
+      "matchPackageNames": ["bun", "@types/bun"],
+      "enabled": false
+    },
+    {
+      "description": "Group dev-only patch/minor updates and automerge after CI passes.",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "dev-dependencies",
+      "automerge": true,
+      "automergeStrategy": "squash"
+    },
+    {
+      "description": "Runtime dependencies ship inside published packages; require manual review plus a changeset.",
+      "matchDepTypes": ["dependencies"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "runtime-dependencies",
+      "automerge": false
+    }
+  ]
+}
