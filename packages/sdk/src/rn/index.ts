@@ -37,6 +37,14 @@ export {
   createReactNativeStorage,
   type ReactNativeStorageOptions
 } from "./storage.js";
+export {
+  createReactNativeNotification,
+  createReactNativeShare,
+  type ReactNativeNotification,
+  type ReactNativeNotificationOptions,
+  type ReactNativeShare,
+  type ReactNativeShareOptions
+} from "./notify-share.js";
 export { createDefaultFrameworkLoader, type FrameworkLoader } from "./framework-loader.js";
 export type {
   FullScreenAdShowEvent,

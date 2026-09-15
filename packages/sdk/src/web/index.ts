@@ -52,6 +52,15 @@ export {
 export { createWebStorage, type WebStorageOptions } from "./identity.js";
 // createWebStorage lives in identity.ts alongside the shared web loader helpers.
 
+export {
+  createWebNotification,
+  createWebShare,
+  type WebNotification,
+  type WebNotificationOptions,
+  type WebShare,
+  type WebShareOptions
+} from "./notify-share.js";
+
 export function createWebIap(options: WebIapOptions) {
   const loader: IapPlatformLoader = !options.framework
     ? createDefaultWebFrameworkLoader()
