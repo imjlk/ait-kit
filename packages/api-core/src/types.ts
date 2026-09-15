@@ -435,6 +435,14 @@ export interface SmartMessageBulkSendInput {
 
 type SmartMessageResponseBase = {
   providerRequestId?: string;
+  /**
+   * `SENT` — delivery confirmed by send-result evidence. `FAILED` — the
+   * provider definitively rejected or failed the send (failure entries /
+   * error envelope / 4xx). `UNKNOWN` — the outcome could not be determined
+   * (malformed or evidence-free response, 5xx, NETWORK_ERROR/TIMEOUT
+   * envelopes): the message may or may not have been delivered; resolve out
+   * of band, never auto-resend on this signal alone.
+   */
   providerStatus: string;
   resultType?: string;
   sentAt?: number;
@@ -459,6 +467,13 @@ export type SmartMessageResponse =
       failureReason?: string;
       providerErrorCode?: string;
       upstreamStatus?: number;
+      /**
+       * Internal parsing/validation marker (e.g. "INVALID_RESPONSE"): the
+       * response body could not be interpreted as a send result. Distinct
+       * from `providerErrorCode`, which mirrors a code the provider
+       * actually returned.
+       */
+      error?: string;
     });
 
 export interface RawMtlsRequest {

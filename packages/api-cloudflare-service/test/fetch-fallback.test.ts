@@ -52,6 +52,40 @@ describe("Cloudflare HTTP fallback", () => {
     await expect(response.json()).resolves.toEqual({ ok: true, providerStatus: "GRANTED" });
   });
 
+  test("preserves unconfirmed message results over the authenticated fallback", async () => {
+    const headers = new Headers({ "content-type": "application/json" });
+    headers.set("authorization", "Bearer expected-token");
+    const response = await handleFetchFallback(
+      new Request("https://service.example/internal/apps-in-toss/smart-message/send", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ tossUserKey: "user-key", templateSetCode: "template", context: {} })
+      }),
+      {
+        ...fakeRpc(),
+        async smartMessageSend() {
+          return {
+            ok: false,
+            providerRequestId: "request-id",
+            providerStatus: "UNKNOWN",
+            error: "INVALID_RESPONSE",
+            failureReason: "response carried no send-result evidence (no counts, no failure entries)"
+          };
+        }
+      },
+      { bearerToken: "expected-token" }
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      providerRequestId: "request-id",
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE",
+      failureReason: "response carried no send-result evidence (no counts, no failure entries)"
+    });
+  });
+
   test("dispatches the authenticated anon key verify route", async () => {
     const headers = new Headers({ "content-type": "application/json" });
     headers.set("authorization", "Bearer expected-token");
