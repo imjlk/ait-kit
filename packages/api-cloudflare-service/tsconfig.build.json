@@ -8,7 +8,7 @@
     "rootDir": "src",
     "outDir": "dist",
     "paths": {
-      "@ait-kit/api-core": ["packages/api-core/dist/index.d.ts"]
+      "@ait-kit/api-core": ["../api-core/dist/index.d.ts"]
     }
   },
   "include": ["src/**/*.ts"]

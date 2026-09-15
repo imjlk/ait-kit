@@ -10,13 +10,13 @@
   "dependencies": {
     "@ait-kit/api-core": "0.2.0",
     "@ait-kit/api-orpc": "0.2.0",
-    "@orpc/server": "1.14.6",
-    "zod": "4.4.3"
+    "@orpc/server": "1.15.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260712.1",
-    "esbuild": "0.28.1",
-    "typescript": "6.0.3",
-    "wrangler": "4.110.0"
+    "@cloudflare/workers-types": "5.20260915.1",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "wrangler": "4.131.2"
   }
 }
