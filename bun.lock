@@ -59,6 +59,16 @@
         "zod": "4.6.5",
       },
     },
+    "packages/sdk": {
+      "name": "@ait-kit/sdk",
+      "version": "0.1.0",
+      "peerDependencies": {
+        "@apps-in-toss/framework": "*",
+      },
+      "optionalPeers": [
+        "@apps-in-toss/framework",
+      ],
+    },
     "templates/cloudflare-toss-api-service": {
       "name": "cloudflare-toss-api-service-template",
       "version": "0.1.0",
@@ -81,6 +91,8 @@
     "@ait-kit/api-core": ["@ait-kit/api-core@workspace:packages/api-core"],
 
     "@ait-kit/api-orpc": ["@ait-kit/api-orpc@workspace:packages/api-orpc"],
+
+    "@ait-kit/sdk": ["@ait-kit/sdk@workspace:packages/sdk"],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 
