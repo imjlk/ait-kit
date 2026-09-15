@@ -172,21 +172,47 @@ publish_package() {
     return
   fi
 
-  rm -f "$publish_log"
-
   if grep -qiE "404|not found" "$publish_log" 2>/dev/null; then
     echo "HINT: ${package_name} is not published yet and npm Trusted Publishing may not be configured for it." >&2
     echo "HINT: register a pending trusted publisher for ${package_name} (repository imjlk/ait-kit, workflow publish.yml) at https://www.npmjs.com/settings/~/trusted-publishers, then retry." >&2
   fi
 
+  rm -f "$publish_log"
+
   return 1
 }
 
 failed_packages=()
+# Failed package names tracked as "|name1|name2|" so dependents can be skipped
+# without publishing packages whose required internal dependency is missing.
+failed_names="|"
 
 for package_path in "${PACKAGES[@]}"; do
-  if ! publish_package "${ROOT_DIR}/${package_path}"; then
+  package_dir="${ROOT_DIR}/${package_path}"
+  package_json="${package_dir}/package.json"
+  package_name="$(read_package_field "$package_json" "name")"
+
+  # PACKAGES is topologically ordered, so a failed dependency is already in
+  # failed_names by the time its dependents are reached.
+  blocked_by=""
+  while IFS= read -r dep_name; do
+    [[ -z "$dep_name" ]] && continue
+    if [[ "$failed_names" == *"|$dep_name|"* ]]; then
+      blocked_by="$dep_name"
+      break
+    fi
+  done < <(node -p "Object.keys(require(process.argv[1]).dependencies ?? {}).join('\n')" "$package_json")
+
+  if [[ -n "$blocked_by" ]]; then
     failed_packages+=("${package_path}")
+    failed_names="${failed_names}${package_name}|"
+    echo "WARNING: skipping ${package_name}; its dependency ${blocked_by} failed to publish." >&2
+    continue
+  fi
+
+  if ! publish_package "$package_dir"; then
+    failed_packages+=("${package_path}")
+    failed_names="${failed_names}${package_name}|"
     echo "WARNING: publishing failed for ${package_path}; continuing with the remaining packages." >&2
   fi
 done
