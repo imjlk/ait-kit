@@ -15,8 +15,8 @@
       "enabled": false
     },
     {
-      "description": "Bun version changes affect the lockfile format and pinned versions in GitHub workflows; manage manually.",
-      "matchPackageNames": ["bun"],
+      "description": "Bun version changes affect the lockfile format and pinned versions in GitHub workflows, and @types/bun must move in lockstep with the manually pinned runtime so typechecking cannot see APIs the runtime lacks; manage both manually.",
+      "matchPackageNames": ["bun", "@types/bun"],
       "enabled": false
     },
     {
