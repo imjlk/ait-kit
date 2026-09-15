@@ -36,11 +36,13 @@ export class IapGrantCoordinator {
       new Error(
         `conflicting grant target for order ${target.orderId}: already ${existing.sku !== target.sku ? `sku ${existing.sku}` : `subscriptionId ${existing.subscriptionId}`}, requested ${target.sku}`
       );
+    // Join rules: sku must match. A caller without a subscriptionId
+    // (pending-order recovery) may join any cached grant for the order; a
+    // caller WITH one must match the cached subscriptionId exactly — a
+    // cached grant without a subscriptionId never satisfies an explicit one.
     const sameTarget = (existing: IapGrantTarget) =>
       existing.sku === target.sku &&
-      (target.subscriptionId === undefined ||
-        existing.subscriptionId === undefined ||
-        existing.subscriptionId === target.subscriptionId);
+      (target.subscriptionId === undefined || existing.subscriptionId === target.subscriptionId);
 
     const inFlight = this.inFlight.get(target.orderId);
     if (inFlight) {

@@ -567,6 +567,83 @@ describe("@ait-kit/sdk IAP adapters", () => {
     expect(grants.calls).toHaveLength(1);
   });
 
+  test("a cached grant without a subscriptionId never satisfies an explicit one", async () => {
+    const fake = fakeIapPlatform();
+    const grants = grantTracker();
+    const iap = createReactNativeIap({ framework: fake.platform, grant: grants.callback });
+
+    // Recovery first: caches { orderId, sku } without a subscriptionId.
+    const recovered = await iap.recoverPendingOrder({
+      orderId: "order-5",
+      sku: "SKU_SUB",
+      paymentCompletedDate: "2026-01-01T00:00:00Z"
+    });
+    expect(recovered.status).toBe("completed");
+
+    // A later subscription purchase claiming the same order with an
+    // explicit subscriptionId must not inherit that grant.
+    const purchase = iap.purchaseSubscription("SKU_SUB");
+    await Bun.sleep(1);
+    const captured = fake.purchases[0];
+    await expect(captured.processProductGrant({ orderId: "order-5", subscriptionId: "sub-A" })).resolves.toBe(false);
+    captured.onError({ code: "PRODUCT_NOT_GRANTED_BY_PARTNER", message: "not granted" });
+    await expect(purchase).resolves.toMatchObject({
+      status: "grant_failed",
+      orderId: "order-5"
+    });
+    // Only the recovery's grant reached the server.
+    expect(grants.calls).toHaveLength(1);
+  });
+
+  test("does not report completion when startOrder blocks past the deadline", async () => {
+    const blocking = fakeIapPlatform();
+    (blocking.platform as { createOneTimePurchaseOrder: unknown }).createOneTimePurchaseOrder = (
+      params: IapOneTimePurchaseParams
+    ) => {
+      const start = Date.now();
+      while (Date.now() - start < 30) {
+        /* block past the 20ms deadline */
+      }
+      // Resolves everything synchronously while the timer callback still
+      // has not run.
+      void Promise.resolve().then(async () => {
+        const granted = await params.options.processProductGrant({ orderId: "order-1" });
+        if (granted) {
+          params.onEvent({ type: "success", data: successPayload("order-1") });
+        } else {
+          params.onError({ code: "INTERNAL_ERROR", message: "grant failed" });
+        }
+      });
+      return () => {};
+    };
+    const iap = createReactNativeIap({
+      framework: blocking.platform,
+      grant: async () => {},
+      purchaseTimeoutMs: 20
+    });
+
+    await expect(iap.purchaseOneTime("SKU_COINS")).resolves.toMatchObject({
+      status: "unknown",
+      orderId: "order-1"
+    });
+  });
+
+  test("calls injected class-instance modules with their receiver", async () => {
+    class InstanceIap {
+      async getProductItemList() {
+        return { products: [{ sku: this.secret, type: "CONSUMABLE", displayName: "x", displayAmount: "1", iconUrl: "i", description: "d" }] };
+      }
+      secret = "FROM_THIS";
+    }
+    const iap = createReactNativeIap({
+      framework: new InstanceIap() as unknown as Parameters<typeof createReactNativeIap>[0]["framework"],
+      grant: async () => {}
+    });
+
+    const { products } = await iap.getProductItemList();
+    expect(products[0].sku).toBe("FROM_THIS");
+  });
+
   test("lists products and reports unsupported operations", async () => {
     const fake = fakeIapPlatform();
     (fake.platform.getProductItemList as { isSupported?: () => boolean }).isSupported = () => false;

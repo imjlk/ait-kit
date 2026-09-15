@@ -1,4 +1,10 @@
-import { SdkError, type IapGrantCallback, type IapProduct } from "../index.js";
+import {
+  SdkError,
+  type IapGrantCallback,
+  type IapOneTimePurchaseParams,
+  type IapProduct,
+  type IapSubscriptionPurchaseParams
+} from "../index.js";
 import type {
   IapPendingOrder,
   IapPurchaseResult
@@ -81,18 +87,17 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
   return {
     async getProductItemList() {
       const platform = await load();
-      const getProductItemList = ensureOperation(platform.getProductItemList, "getProductItemList");
-      return getProductItemList();
+      ensureOperation(platform.getProductItemList, "getProductItemList");
+      // Called as a member so class-instance modules keep their receiver.
+      return platform.getProductItemList!();
     },
 
     purchaseOneTime(sku: string) {
       return purchaseWithDeadline(async (platform, remainingMs) => {
-        const startOrder = ensureOperation(
-          platform.createOneTimePurchaseOrder,
-          "one-time purchases"
-        );
+        ensureOperation(platform.createOneTimePurchaseOrder, "one-time purchases");
         return await runPurchaseFlow({
-          startOrder,
+          startOrder: (params: IapOneTimePurchaseParams) =>
+            platform.createOneTimePurchaseOrder!(params),
           coordinator,
           sku,
           subscription: false,
@@ -103,12 +108,10 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
 
     purchaseSubscription(sku: string, offerId?: string) {
       return purchaseWithDeadline(async (platform, remainingMs) => {
-        const startOrder = ensureOperation(
-          platform.createSubscriptionPurchaseOrder,
-          "subscription purchases"
-        );
+        ensureOperation(platform.createSubscriptionPurchaseOrder, "subscription purchases");
         return await runPurchaseFlow({
-          startOrder,
+          startOrder: (params: IapSubscriptionPurchaseParams) =>
+            platform.createSubscriptionPurchaseOrder!(params),
           coordinator,
           sku,
           ...(offerId !== undefined ? { offerId } : {}),
@@ -120,16 +123,13 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
 
     async getPendingOrders() {
       const platform = await load();
-      const getPendingOrders = ensureOperation(platform.getPendingOrders, "getPendingOrders");
-      return getPendingOrders();
+      ensureOperation(platform.getPendingOrders, "getPendingOrders");
+      return platform.getPendingOrders!();
     },
 
     async recoverPendingOrder(order: IapPendingOrder): Promise<IapRecoveryResult> {
       const platform = await load();
-      const completeProductGrant = ensureOperation(
-        platform.completeProductGrant,
-        "completeProductGrant"
-      );
+      ensureOperation(platform.completeProductGrant, "completeProductGrant");
       try {
         // Server grant confirmation first (deduped within this adapter's
         // scope); the completion notification follows only after it.
@@ -138,7 +138,7 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
         const reason = error instanceof Error ? error.message : String(error);
         return { status: "grant_failed", orderId: order.orderId, reason };
       }
-      const notified = await notifyGrantComplete(completeProductGrant, order.orderId);
+      const notified = await notifyGrantComplete(platform, order.orderId);
       if (!notified.ok) {
         return {
           status: "notify_failed",
@@ -193,17 +193,32 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
       return timedOut();
     }
     const remainingMs = Math.max(1, purchaseTimeoutMs - (Date.now() - startedAt));
-    return run(platform, remainingMs);
+    const result = await run(platform, remainingMs);
+    if (Date.now() - startedAt >= purchaseTimeoutMs) {
+      // A synchronous startOrder can block past the deadline and settle the
+      // flow before the overdue timer callback runs. The deadline is the
+      // deadline: preserve any order identity the result already carries
+      // for server-side recovery.
+      const identified = result as { orderId?: string; subscriptionId?: string };
+      return {
+        ...timedOut(),
+        ...(identified.orderId !== undefined ? { orderId: identified.orderId } : {}),
+        ...(identified.subscriptionId !== undefined
+          ? { subscriptionId: identified.subscriptionId }
+          : {})
+      };
+    }
+    return result;
   }
 }
 
 async function notifyGrantComplete(
-  completeProductGrant: NonNullable<PartialIapPlatformSdk["completeProductGrant"]>,
+  platform: PartialIapPlatformSdk,
   orderId: string
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   let notified: boolean;
   try {
-    notified = await completeProductGrant({ params: { orderId } });
+    notified = await platform.completeProductGrant!({ params: { orderId } });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return {
