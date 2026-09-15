@@ -1,4 +1,4 @@
-import { requestToss } from "./mtls-client";
+import { requestToss, resolveMtlsClient } from "./mtls-client";
 import { normalizeMessageRecipient, recipientIdentifierHeaders } from "./recipient";
 import {
   AppsInTossApiError,
@@ -221,6 +221,12 @@ export async function executePromotionReward(
     return { ok: true, result: "SUBMITTED", providerTransactionKey, stub: true };
   }
 
+  // Resolve the transport before the dispatch window so configuration and
+  // factory failures propagate: they happen before anything is sent and must
+  // not masquerade as an uncertain outcome.
+  const mtlsClient = await resolveMtlsClient(options);
+  const dispatchOptions = { ...options, mtlsClient };
+
   let executeResponse;
   try {
     executeResponse = await requestToss(
@@ -230,7 +236,7 @@ export async function executePromotionReward(
         body: { promotionCode, key: providerTransactionKey, amount },
         headers: recipientIdentifierHeaders(recipient)
       },
-      options
+      dispatchOptions
     );
   } catch (error) {
     // Kit-generated errors (missing mTLS client, invalid path) are thrown
@@ -329,6 +335,11 @@ export async function statusPromotionReward(
     };
   }
 
+  // Same pre-dispatch resolution as execute: factory/configuration failures
+  // are never outcome-ambiguous.
+  const mtlsClient = await resolveMtlsClient(options);
+  const dispatchOptions = { ...options, mtlsClient };
+
   let resultResponse;
   try {
     resultResponse = await requestToss(
@@ -338,7 +349,7 @@ export async function statusPromotionReward(
         body: { promotionCode, key: providerTransactionKey },
         headers: recipientIdentifierHeaders(recipient)
       },
-      options
+      dispatchOptions
     );
   } catch (error) {
     // Kit-generated pre-dispatch errors (configuration, path) must surface,
@@ -369,6 +380,20 @@ export async function statusPromotionReward(
     return unknownStatus(providerTransactionKey, options, {
       failureReason: upstreamFailureReason(resultResponse.body),
       providerErrorCode,
+      upstreamStatus: resultResponse.status
+    });
+  }
+
+  // Only a verdict inside an explicit SUCCESS envelope counts; a 2xx payload
+  // without one (or with an unrecognized resultType) stays UNKNOWN.
+  const resultType = String(
+    readPathString(resultResponse.body, ["resultType", "success.resultType", "data.resultType"]) ?? ""
+  ).trim().toUpperCase();
+  if (resultType !== "SUCCESS") {
+    return unknownStatus(providerTransactionKey, options, {
+      failureReason: resultType
+        ? `unexpected promotion result envelope: ${resultType}`
+        : "promotion status response was not a SUCCESS envelope",
       upstreamStatus: resultResponse.status
     });
   }
@@ -424,11 +449,12 @@ function resolvePromotionCode(
   action: string
 ) {
   if (isPresent(request.promotionCode)) {
-    const code = stringOrUndefined(request.promotionCode);
-    if (!code) {
+    // Strict string check: numeric or object values are rejected rather than
+    // coerced, so the dispatched code always matches what the caller sent.
+    if (typeof request.promotionCode !== "string" || !request.promotionCode.trim()) {
       throw clientError("INVALID_PROMOTION_CODE", `promotionCode must be a non-empty string to ${action}`);
     }
-    return code;
+    return request.promotionCode;
   }
   if (options.tossPromotionCode) return options.tossPromotionCode;
   throw clientError("MISSING_PROMOTION_CODE", `promotionCode is required to ${action}`);

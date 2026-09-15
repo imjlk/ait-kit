@@ -1272,6 +1272,71 @@ describe("@ait-kit/api-core", () => {
       });
     });
 
+    test.each([
+      ["no resultType", { success: "SUCCESS" }],
+      ["an unrecognized resultType", { resultType: "WEIRD", success: "SUCCESS" }]
+    ] as const)("keeps a 2xx status payload with %s as UNKNOWN", async (_label, body) => {
+      const { api } = recordingApi(async () => Response.json(body));
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({ ok: true, status: "UNKNOWN" });
+    });
+
+    test("propagates factory failures that occur before dispatch", async () => {
+      const api = createAppsInTossApiRpc(
+        createAppsInTossApi({
+          mode: "forward",
+          upstreamBaseUrl: "https://partner.example",
+          appId: "app-id",
+          mtlsClientFactory: {
+            forApp: async () => {
+              throw new Error("factory boom");
+            }
+          }
+        })
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          amount: 1000,
+          tossUserKey: "user"
+        })
+      ).rejects.toThrow("factory boom");
+      await expect(
+        api.promotionRewardStatus({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          tossUserKey: "user"
+        })
+      ).rejects.toThrow("factory boom");
+    });
+
+    test.each([
+      ["a numeric promotion code", 123],
+      ["an object promotion code", { code: "promo" }]
+    ] as const)("rejects %s instead of coercing it", async (_label, promotionCode) => {
+      const { api, paths } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          promotionCode,
+          amount: 1000,
+          tossUserKey: "user"
+        } as never)
+      ).rejects.toMatchObject({ code: "INVALID_PROMOTION_CODE", status: 400 });
+      expect(paths).toEqual([]);
+    });
+
     test("rejects an explicitly invalid amount instead of applying the configured default", async () => {
       const { api, paths } = recordingApi(async () =>
         Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } }),
