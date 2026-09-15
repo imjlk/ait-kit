@@ -1,5 +1,11 @@
 # @ait-kit/api-client
 
+## 0.4.0 — 2026-09-16
+
+### Patch changes
+
+- Updated dependencies: api-core@0.4.0
+
 ## 0.3.0 — 2026-09-15
 
 ### Minor changes
