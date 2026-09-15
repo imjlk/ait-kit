@@ -275,6 +275,77 @@ describe("@ait-kit/sdk/rn ads", () => {
     await expect(ads.loadFullScreenAd("group-a")).rejects.toMatchObject({ code: "AD_LOAD_TIMEOUT" });
   });
 
+  test("bounds show framework acquisition with the show deadline", async () => {
+    const framework = fakeFramework((call) => {
+      if (call.phase === "load") {
+        queueMicrotask(() => call.emit({ type: "loaded" }));
+      }
+      // Show registers but never emits; the test drives it.
+    });
+    let stallNextLoaderCall = false;
+    const ads = createReactNativeAds({
+      framework: () => {
+        if (stallNextLoaderCall) {
+          stallNextLoaderCall = false;
+          return new Promise(() => {});
+        }
+        return Promise.resolve({ available: true, module: framework });
+      },
+      showTimeoutMs: 20
+    });
+
+    await ads.loadFullScreenAd("group-a");
+    stallNextLoaderCall = true; // the show's loader call never resolves
+    await expect(ads.showFullScreenAd("group-a")).resolves.toEqual({
+      status: "failed",
+      reason: "ad show flow timed out"
+    });
+
+    // The stalled show released its claim: a new load/show cycle works.
+    await ads.loadFullScreenAd("group-a");
+    const second = ads.showFullScreenAd("group-a");
+    await Bun.sleep(1);
+    framework.calls
+      .filter((call) => call.phase === "show")
+      .slice(-1)
+      .forEach((call) => call.emit({ type: "dismissed" }));
+    await expect(second).resolves.toEqual({ status: "dismissed" });
+  });
+
+  test("a timed-out load never registers with the provider afterwards", async () => {
+    const framework = fakeFramework((call) => {
+      if (call.phase === "load") {
+        queueMicrotask(() => call.emit({ type: "loaded" }));
+      }
+    });
+    let firstLoaderCall = true;
+    let resolveFirst: (value: { available: true; module: typeof framework }) => void = () => {};
+    const ads = createReactNativeAds({
+      framework: () => {
+        if (firstLoaderCall) {
+          firstLoaderCall = false;
+          return new Promise((resolve) => {
+            resolveFirst = resolve;
+          });
+        }
+        return Promise.resolve({ available: true, module: framework });
+      },
+      loadTimeoutMs: 20
+    });
+
+    await expect(ads.loadFullScreenAd("group-a")).rejects.toMatchObject({ code: "AD_LOAD_TIMEOUT" });
+
+    // The loader resolves only after the deadline: the orphaned task must
+    // not register a provider load for the cancelled request.
+    resolveFirst({ available: true, module: framework });
+    await Bun.sleep(5);
+    expect(framework.calls.filter((call) => call.phase === "load")).toHaveLength(0);
+
+    // A retry registers normally and succeeds.
+    await expect(ads.loadFullScreenAd("group-a")).resolves.toBeUndefined();
+    expect(framework.calls.filter((call) => call.phase === "load")).toHaveLength(1);
+  });
+
   test("rejects with SDK_UNAVAILABLE when the framework is missing", async () => {
     let attempts = 0;
     const ads = createReactNativeAds({
