@@ -1,3 +1,4 @@
+---
 npm/@ait-kit/sdk: minor
 ---
 
