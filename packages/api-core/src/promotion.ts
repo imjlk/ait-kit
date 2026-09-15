@@ -209,10 +209,7 @@ export async function executePromotionReward(
   options: NormalizedAppsInTossCoreOptions
 ): Promise<PromotionRewardExecuteResponse> {
   const request = objectOrSelf(body, {});
-  const providerTransactionKey = stringOrUndefined(request.providerTransactionKey);
-  if (!providerTransactionKey) {
-    throw clientError("MISSING_TRANSACTION_KEY", "providerTransactionKey is required to execute a promotion");
-  }
+  const providerTransactionKey = requireTransactionKey(request, "execute a promotion");
   const promotionCode = resolvePromotionCode(request, options, "execute");
   const amount = resolvePromotionAmount(request, options, "execute");
   const recipient = normalizeMessageRecipient(request, "INVALID_PROMOTION_RECIPIENT", "promotion recipient");
@@ -317,10 +314,7 @@ export async function statusPromotionReward(
   options: NormalizedAppsInTossCoreOptions
 ): Promise<PromotionRewardStatusResponse> {
   const request = objectOrSelf(body, {});
-  const providerTransactionKey = stringOrUndefined(request.providerTransactionKey);
-  if (!providerTransactionKey) {
-    throw clientError("MISSING_TRANSACTION_KEY", "providerTransactionKey is required to check promotion status");
-  }
+  const providerTransactionKey = requireTransactionKey(request, "check promotion status");
   const promotionCode = resolvePromotionCode(request, options, "check promotion status");
   const recipient = normalizeMessageRecipient(request, "INVALID_PROMOTION_RECIPIENT", "promotion recipient");
 
@@ -462,8 +456,10 @@ function resolvePromotionCode(
 
 /**
  * Resolves the grant amount for the execute step under the same rule: an
- * explicitly supplied invalid amount (zero, negative, fractional) is
- * rejected rather than swapped for the configured default.
+ * explicitly supplied invalid amount (non-number, zero, negative, fractional)
+ * is rejected rather than swapped for the configured default. Coercible
+ * values like "1000" or true are rejected too — the dispatched amount must
+ * match the number the caller validated and persisted.
  */
 function resolvePromotionAmount(
   request: Record<string, unknown>,
@@ -472,14 +468,29 @@ function resolvePromotionAmount(
 ) {
   const raw = request.amount ?? request.promotionAmount;
   if (raw !== undefined && raw !== null) {
-    const amount = positiveIntegerOrUndefined(raw);
-    if (!amount) {
+    if (typeof raw !== "number" || !Number.isInteger(raw) || raw <= 0) {
       throw clientError("INVALID_PROMOTION_AMOUNT", `amount must be a positive integer to ${action}`);
     }
-    return amount;
+    return raw;
   }
   if (options.tossPromotionAmount) return options.tossPromotionAmount;
   throw clientError("MISSING_PROMOTION_AMOUNT", `amount is required to ${action}`);
+}
+
+/**
+ * Requires the provider transaction key exactly as issued by prepare: a
+ * strict non-empty string, so numeric or object values from untyped
+ * boundaries are rejected instead of coerced into a different key.
+ */
+function requireTransactionKey(request: Record<string, unknown>, action: string) {
+  const raw = request.providerTransactionKey;
+  if (raw === undefined || raw === null) {
+    throw clientError("MISSING_TRANSACTION_KEY", `providerTransactionKey is required to ${action}`);
+  }
+  if (typeof raw !== "string" || !raw.trim()) {
+    throw clientError("INVALID_TRANSACTION_KEY", `providerTransactionKey must be a non-empty string to ${action}`);
+  }
+  return raw;
 }
 
 function isPresent(value: unknown) {

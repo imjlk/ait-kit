@@ -1337,6 +1337,51 @@ describe("@ait-kit/api-core", () => {
       expect(paths).toEqual([]);
     });
 
+    test.each([
+      ["a numeric transaction key", 123],
+      ["an object transaction key", { key: "k" }]
+    ] as const)("rejects %s instead of coercing it", async (_label, providerTransactionKey) => {
+      const { api, paths } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey,
+          promotionCode: "promo",
+          amount: 1000,
+          tossUserKey: "user"
+        } as never)
+      ).rejects.toMatchObject({ code: "INVALID_TRANSACTION_KEY", status: 400 });
+      await expect(
+        api.promotionRewardStatus({
+          providerTransactionKey,
+          promotionCode: "promo",
+          tossUserKey: "user"
+        } as never)
+      ).rejects.toMatchObject({ code: "INVALID_TRANSACTION_KEY", status: 400 });
+      expect(paths).toEqual([]);
+    });
+
+    test.each([
+      ["a string amount", "1000"],
+      ["a boolean amount", true]
+    ] as const)("rejects %s instead of coercing it", async (_label, amount) => {
+      const { api, paths } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          amount,
+          tossUserKey: "user"
+        } as never)
+      ).rejects.toMatchObject({ code: "INVALID_PROMOTION_AMOUNT", status: 400 });
+      expect(paths).toEqual([]);
+    });
+
     test("rejects an explicitly invalid amount instead of applying the configured default", async () => {
       const { api, paths } = recordingApi(async () =>
         Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } }),
