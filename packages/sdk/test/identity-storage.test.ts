@@ -64,6 +64,7 @@ describe("@ait-kit/sdk identity adapters", () => {
 
   test.each([
     ["empty authorizationCode", { authorizationCode: "", referrer: "DEFAULT" }],
+    ["whitespace-only authorizationCode", { authorizationCode: "   ", referrer: "DEFAULT" }],
     ["missing authorizationCode", { referrer: "SANDBOX" }],
     ["unrecognized referrer", { authorizationCode: "code-1", referrer: "OTHER" }],
     ["non-string referrer", { authorizationCode: "code-1", referrer: 3 }]

@@ -56,8 +56,11 @@ export async function runSdkLogin(
     typeof result === "object" && result !== null
       ? (result as { referrer?: unknown }).referrer
       : undefined;
-  if (typeof authorizationCode !== "string" || !authorizationCode) {
-    throw new SdkError("INVALID_LOGIN_RESULT", "login result did not include an authorizationCode string");
+  if (typeof authorizationCode !== "string" || !authorizationCode.trim()) {
+    throw new SdkError(
+      "INVALID_LOGIN_RESULT",
+      "login result did not include a non-blank authorizationCode string"
+    );
   }
   if (typeof referrer !== "string" || !REFERRERS.has(referrer)) {
     throw new SdkError(
