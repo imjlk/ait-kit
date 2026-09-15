@@ -187,7 +187,10 @@ export function normalizeIapOrderStatusResponse(
   if (providerStatusState.state === "invalid") {
     return invalidIapResponse(request, "success payload carried a status that was not a string", upstreamStatus);
   }
-  const providerStatus = providerStatusState.value.toUpperCase();
+  // The status is a provider enum, not an identifier: normalize it as
+  // before so padded values still classify. Only identifiers (orderId,
+  // sku) keep the provider's exact bytes.
+  const providerStatus = providerStatusState.value.trim().toUpperCase();
 
   // Optional evidence fields: absence is documented for some statuses
   // (MINIAPP_MISMATCH, NOT_FOUND, ERROR), but a present value with the

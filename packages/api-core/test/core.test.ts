@@ -1931,6 +1931,44 @@ describe("smart message send-result evidence validation", () => {
     });
   });
 
+  test.each(["FAIL", "ERROR", "REJECTED", "FAILED"] as const)(
+    "treats a stated providerStatus %s next to a SUCCESS envelope as failure",
+    async (status) => {
+      const response = normalizeMessageResponse(
+        {},
+        { providerStatus: status, resultType: "SUCCESS", success: { msgCount: 1 } }
+      );
+
+      expect(response).toMatchObject({ ok: false, providerStatus: "FAILED" });
+      expect(response).not.toMatchObject({ ok: true });
+    }
+  );
+
+  test("a 5xx unknown carries the internal invalid-response marker", () => {
+    const response = normalizeMessageResponse({}, { message: "gateway down" }, 503);
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE",
+      upstreamStatus: 503
+    });
+  });
+
+  test("padded IAP status enums still classify as payable and retryable", () => {
+    const payable = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: "SUCCESS", success: { orderId: "order-id", status: " PAYMENT_COMPLETED " } }
+    );
+    expect(payable).toMatchObject({ ok: true, verified: true, providerStatus: "PAYMENT_COMPLETED" });
+
+    const pending = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: "SUCCESS", success: { orderId: "order-id", status: " ORDER_IN_PROGRESS " } }
+    );
+    expect(pending).toMatchObject({ ok: true, verified: false, verificationCode: "PAYMENT_INCOMPLETE" });
+  });
+
   test("unknown results keep correlation info but never fabricate a sentAt", () => {
     const response = normalizeMessageResponse(
       { providerRequestId: "req-9" },

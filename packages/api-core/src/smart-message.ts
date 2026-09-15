@@ -115,6 +115,13 @@ export function bulkMessageUpstreamBody(body: Record<string, unknown>) {
 const MESSAGE_FAILURE_RESULT_TYPES = new Set(["FAIL", "FAILED", "ERROR"]);
 
 /**
+ * Stated provider statuses that mean failure when they appear next to a
+ * SUCCESS envelope (the same set the previous messageStatusOk logic
+ * treated as failures).
+ */
+const STATED_FAILURE_STATUSES = new Set(["FAILED", "FAIL", "ERROR", "REJECTED"]);
+
+/**
  * Envelope resultTypes where the provider could not determine the outcome:
  * the message may or may not have been delivered, so the result stays
  * UNKNOWN instead of asserting a definite failure.
@@ -155,6 +162,9 @@ export function normalizeMessageResponse(
       ok: false,
       providerRequestId,
       providerStatus: unknown ? "UNKNOWN" : "FAILED",
+      // Unconfirmable outcomes carry the internal marker so callers can
+      // route them to out-of-band resolution, distinct from provider codes.
+      ...(unknown ? { error: "INVALID_RESPONSE" } : {}),
       resultType,
       sentAt: sentAtWithoutNow,
       failureReason: upstreamFailureReason(upstreamObject),
@@ -205,14 +215,15 @@ export function normalizeMessageResponse(
         providerErrorCode: upstreamFailureCode(upstreamObject)
       };
     }
-    // A provider-emitted FAILED status alongside a SUCCESS envelope is the
-    // provider contradicting itself: the stated failure wins, exactly as
-    // it did before envelope classification existed.
+    // A provider-emitted failure status alongside a SUCCESS envelope is the
+    // provider contradicting itself: the stated failure wins, exactly as it
+    // did before envelope classification existed (messageStatusOk treated
+    // this same set — FAILED, FAIL, ERROR, REJECTED — as failures).
     const statedStatus = readStrictStringState(upstream, ["providerStatus"]);
     if (
       envelopeResultType.value === "SUCCESS" &&
       statedStatus.state === "present" &&
-      statedStatus.value.toUpperCase() === "FAILED"
+      STATED_FAILURE_STATUSES.has(statedStatus.value.toUpperCase())
     ) {
       return {
         ok: false,
