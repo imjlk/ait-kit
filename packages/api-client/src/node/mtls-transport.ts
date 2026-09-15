@@ -69,6 +69,14 @@ export function createNodeMtlsTransport(options: NodeMtlsTransportOptions) {
   const ca = options.ca;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  // Non-finite budgets silently disable their guard (NaN comparisons are
+  // always false), so reject them up front rather than at attack time.
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new Error("timeoutMs must be a non-negative finite number");
+  }
+  if (!Number.isFinite(maxResponseBytes) || maxResponseBytes <= 0) {
+    throw new Error("maxResponseBytes must be a positive finite number");
+  }
 
   return {
     async request(url: string, init: RequestInit): Promise<Response> {
@@ -170,10 +178,13 @@ export function createNodeMtlsTransport(options: NodeMtlsTransportOptions) {
         };
 
         // One hard budget across DNS, connect, TLS, headers, and the entire
-        // body; the timer only clears after the body fully completes.
-        timer = setTimeout(() => {
-          settle(new NodeMtlsTransportError("TIMEOUT", `request timed out after ${timeoutMs}ms`));
-        }, timeoutMs);
+        // body; the timer only clears after the body fully completes. A
+        // zero budget disables the deadline, matching the root client.
+        if (timeoutMs > 0) {
+          timer = setTimeout(() => {
+            settle(new NodeMtlsTransportError("TIMEOUT", `request timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }
 
         if (signal) {
           signal.addEventListener("abort", onAbort, { once: true });
@@ -239,6 +250,15 @@ export function createNodeMtlsTransport(options: NodeMtlsTransportOptions) {
             settled = true;
             cleanup();
             const bodyBuffer = Buffer.concat(chunks);
+            const status = response.statusCode ?? 200;
+            // The Fetch Response constructor throws for non-null bodies on
+            // null-body statuses (and this handler runs after settle), so
+            // those statuses always construct with null. Empty bodies pass
+            // null too.
+            const bodyInit =
+              status === 204 || status === 205 || status === 304 || bodyBuffer.length === 0
+                ? null
+                : new Uint8Array(bodyBuffer);
             const responseHeaders = new Headers();
             for (const [name, value] of Object.entries(response.headers)) {
               if (value === undefined) continue;
@@ -247,8 +267,8 @@ export function createNodeMtlsTransport(options: NodeMtlsTransportOptions) {
               }
             }
             resolve(
-              new Response(new Uint8Array(bodyBuffer), {
-                status: response.statusCode ?? 200,
+              new Response(bodyInit, {
+                status,
                 statusText: response.statusMessage ?? "",
                 headers: responseHeaders
               })

@@ -32,7 +32,7 @@ export async function startMtlsTestServer(): Promise<MtlsTestServer> {
   run(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key", "-out", "server.csr", "-subj", "/CN=localhost"]);
   execFileSync(
     "openssl",
-    ["x509", "-req", "-in", "server.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "server.crt", "-days", "1"],
+    ["x509", "-req", "-in", "server.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "server.crt", "-days", "1", "-extfile", "-"],
     { cwd: dir, input: "subjectAltName=DNS:localhost,IP:127.0.0.1\n" }
   );
   // Client certificate signed by the same CA.

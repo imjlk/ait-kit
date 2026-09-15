@@ -47,6 +47,35 @@ describe("@ait-kit/api-client/node mTLS transport", () => {
     expect(payload.ok).toBe(true);
   });
 
+  test("resolves null-body statuses with a null response body", async () => {
+    const response = await transport.request(`${server.baseUrl}/no-content`, { method: "GET" });
+    expect(response.status).toBe(204);
+    expect(response.body).toBeNull();
+  });
+
+  test("rejects non-finite budget options at construction", () => {
+    for (const maxResponseBytes of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1]) {
+      expect(() =>
+        createNodeMtlsTransport({
+          cert: server.clientCert,
+          key: server.clientKey,
+          ca: server.ca,
+          maxResponseBytes
+        })
+      ).toThrow(/maxResponseBytes/);
+    }
+    for (const timeoutMs of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(() =>
+        createNodeMtlsTransport({
+          cert: server.clientCert,
+          key: server.clientKey,
+          ca: server.ca,
+          timeoutMs
+        })
+      ).toThrow(/timeoutMs/);
+    }
+  });
+
   test("completes a slowly streaming body within the overall deadline", async () => {
     const response = await transport.request(`${server.baseUrl}/slow-body?chunks=3`, { method: "GET" });
     expect(response.status).toBe(200);

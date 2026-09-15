@@ -49,6 +49,12 @@ const server = createServer(
       return;
     }
 
+    if (url.pathname === "/no-content") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     if (url.pathname === "/slow-body") {
       // Headers arrive immediately; the body trickles in but completes.
       res.writeHead(200, { "content-type": "text/plain" });
