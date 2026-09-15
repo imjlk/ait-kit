@@ -12,8 +12,14 @@ export type {
   MessageRecipient,
   MtlsClient,
   MtlsClientFactory,
+  PromotionRewardExecuteInput,
+  PromotionRewardExecuteResponse,
   PromotionRewardGrantInput,
   PromotionRewardGrantResponse,
+  PromotionRewardPrepareInput,
+  PromotionRewardPrepareResponse,
+  PromotionRewardStatusInput,
+  PromotionRewardStatusResponse,
   RawMtlsRequest,
   RawMtlsResponse,
   SmartMessageBulkSendInput,
@@ -32,8 +38,14 @@ import type {
   HealthResponse,
   IapOrderStatusInput,
   IapOrderStatusResponse,
+  PromotionRewardExecuteInput,
+  PromotionRewardExecuteResponse,
   PromotionRewardGrantInput,
   PromotionRewardGrantResponse,
+  PromotionRewardPrepareInput,
+  PromotionRewardPrepareResponse,
+  PromotionRewardStatusInput,
+  PromotionRewardStatusResponse,
   RawMtlsRequest,
   RawMtlsResponse,
   SmartMessageBulkSendInput,
@@ -54,6 +66,9 @@ export const PROXY_ENDPOINTS = Object.freeze({
   iapOrderStatus: "/internal/apps-in-toss/iap/order/status",
   anonKeyVerify: "/internal/apps-in-toss/users/anon-key/verify",
   promotionRewardGrant: "/internal/apps-in-toss/promotion/reward/grant",
+  promotionPrepareReward: "/internal/apps-in-toss/promotion/reward/prepare",
+  promotionExecuteReward: "/internal/apps-in-toss/promotion/reward/execute",
+  promotionRewardStatus: "/internal/apps-in-toss/promotion/reward/status",
   smartMessageSend: "/internal/apps-in-toss/smart-message/send",
   smartMessageBulkSend: "/internal/apps-in-toss/smart-message/send-bulk"
 });
@@ -75,6 +90,9 @@ export interface TossMtlsHttpClient {
   iapOrderStatus(body: IapOrderStatusInput): Promise<IapOrderStatusResponse>;
   anonKeyVerify(body: AnonKeyVerifyInput): Promise<AnonKeyVerifyResponse>;
   promotionRewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
+  promotionPrepareReward(body?: PromotionRewardPrepareInput): Promise<PromotionRewardPrepareResponse>;
+  promotionExecuteReward(body: PromotionRewardExecuteInput): Promise<PromotionRewardExecuteResponse>;
+  promotionRewardStatus(body: PromotionRewardStatusInput): Promise<PromotionRewardStatusResponse>;
   smartMessageSend(body: SmartMessageSendInput): Promise<SmartMessageResponse>;
   smartMessageBulkSend(body: SmartMessageBulkSendInput): Promise<SmartMessageResponse>;
 }
@@ -164,6 +182,9 @@ export function createTossMtlsHttpClient(options: TossMtlsHttpClientOptions): To
     iapOrderStatus: (body) => request("POST", PROXY_ENDPOINTS.iapOrderStatus, body),
     anonKeyVerify: (body) => request("POST", PROXY_ENDPOINTS.anonKeyVerify, body),
     promotionRewardGrant: (body) => request("POST", PROXY_ENDPOINTS.promotionRewardGrant, body),
+    promotionPrepareReward: () => request("POST", PROXY_ENDPOINTS.promotionPrepareReward, {}),
+    promotionExecuteReward: (body) => request("POST", PROXY_ENDPOINTS.promotionExecuteReward, body),
+    promotionRewardStatus: (body) => request("POST", PROXY_ENDPOINTS.promotionRewardStatus, body),
     smartMessageSend: (body) => request("POST", PROXY_ENDPOINTS.smartMessageSend, body),
     smartMessageBulkSend: (body) => request("POST", PROXY_ENDPOINTS.smartMessageBulkSend, body)
   };

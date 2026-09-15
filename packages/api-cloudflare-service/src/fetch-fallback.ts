@@ -54,6 +54,12 @@ function resolvePostHandler(pathname: string, rpc: AppsInTossApiRpc) {
       return (body: Parameters<AppsInTossApiRpc["verifyAnonKey"]>[0]) => rpc.verifyAnonKey(body);
     case "/internal/apps-in-toss/promotion/reward/grant":
       return (body: Parameters<AppsInTossApiRpc["promotionRewardGrant"]>[0]) => rpc.promotionRewardGrant(body);
+    case "/internal/apps-in-toss/promotion/reward/prepare":
+      return (body: Parameters<AppsInTossApiRpc["promotionPrepareReward"]>[0]) => rpc.promotionPrepareReward(body);
+    case "/internal/apps-in-toss/promotion/reward/execute":
+      return (body: Parameters<AppsInTossApiRpc["promotionExecuteReward"]>[0]) => rpc.promotionExecuteReward(body);
+    case "/internal/apps-in-toss/promotion/reward/status":
+      return (body: Parameters<AppsInTossApiRpc["promotionRewardStatus"]>[0]) => rpc.promotionRewardStatus(body);
     case "/internal/apps-in-toss/smart-message/send":
       return (body: Parameters<AppsInTossApiRpc["smartMessageSend"]>[0]) => rpc.smartMessageSend(body);
     case "/internal/apps-in-toss/smart-message/send-bulk":
