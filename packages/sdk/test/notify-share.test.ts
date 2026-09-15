@@ -221,6 +221,29 @@ describe("@ait-kit/sdk share", () => {
     });
   });
 
+  test.each(["intoss://", "intoss:///route", "intoss://?x=1"] as const)(
+    "rejects paths without a mini-app authority (%s)",
+    async (path) => {
+      const share = createReactNativeShare({ framework: fakeSharePlatform().platform });
+      await expect(share.createLink(path)).rejects.toMatchObject({ code: "INVALID_SHARE_PATH" });
+    }
+  );
+
+  test("accepts partial Share surfaces per operation", async () => {
+    const linkOnly = {
+      Share: {
+        createLink: async () => "https://toss.im/intoss?d=x"
+      }
+    };
+    const share = createReactNativeShare({ framework: linkOnly as never });
+
+    await expect(share.createLink("intoss://app")).resolves.toBe("https://toss.im/intoss?d=x");
+    await expect(share.sendMessage("x")).rejects.toMatchObject({
+      code: "UNSUPPORTED",
+      message: expect.stringContaining("Share.sendMessage")
+    });
+  });
+
   test("rejects non-deeplink paths with INVALID_SHARE_PATH", async () => {
     const share = createReactNativeShare({ framework: fakeSharePlatform().platform });
 

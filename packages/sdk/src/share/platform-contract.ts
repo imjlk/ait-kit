@@ -13,10 +13,10 @@ export interface ShareCreateLinkParams {
 type FunctionWithSupport<F> = F & { isSupported?: () => boolean };
 
 export interface ShareLike {
-  createLink:
+  createLink?:
     | FunctionWithSupport<(params: ShareCreateLinkParams) => Promise<string>>
     | undefined;
-  sendMessage:
+  sendMessage?:
     | FunctionWithSupport<(message: { message: string }) => Promise<void>>
     | undefined;
 }
@@ -36,7 +36,7 @@ export type SharePlatformLoader = () => Promise<
 export function validateSharePath(path: string): string {
   // The path is dispatched verbatim, so surrounding whitespace must be
   // rejected rather than silently trimmed away.
-  if (typeof path !== "string" || !/^intoss:\/\/\S*$/.test(path)) {
+  if (typeof path !== "string" || !/^intoss:\/\/[^\s/?#][^\s]*$/.test(path)) {
     throw new SdkError(
       "INVALID_SHARE_PATH",
       `share link path must be an intoss:// deeplink, received: ${String(path)}`

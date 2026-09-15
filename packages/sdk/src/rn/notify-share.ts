@@ -215,7 +215,18 @@ async function agreementWithLoaderDeadline(
     return timedOut();
   }
   const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
-  return runRequestAgreement(platform, templateCode, remainingMs);
+  // The public reason reports the CONFIGURED deadline, not the remainder
+  // left after loading; the remainder still bounds the actual flow.
+  const flow = runRequestAgreement(platform, templateCode, remainingMs);
+  const configured = timeoutMs;
+  return flow.then((result) =>
+    result.status === "timeout"
+      ? {
+          ...result,
+          reason: `agreement request timed out after ${configured}ms; the user may still act — resolve the state server-side before retrying`
+        }
+      : result
+  );
 }
 
 async function loadNotificationPlatform(
