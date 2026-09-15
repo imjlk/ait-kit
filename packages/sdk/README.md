@@ -100,8 +100,51 @@ SDK initialization never grants or completes pending orders by itself.
 | Full-screen ads | ✅ | ➖ | ads are RN-only today |
 | Unsupported app version | `SdkError("UNSUPPORTED")` | same | per-function `isSupported` gates |
 
-Login/anonymous-key helpers and storage arrive in a later entry, as do
-notification and sharing.
+Notification and sharing arrive in a later entry.
+
+## Login, anonymous identity, and storage (RN + Web)
+
+```ts
+import { createReactNativeIdentity, createReactNativeStorage } from "@ait-kit/sdk/rn";
+// or: import { createWebIdentity, createWebStorage } from "@ait-kit/sdk/web";
+
+const identity = createReactNativeIdentity();
+
+// 1. Login: the adapter validates and preserves authorizationCode/referrer.
+const login = await identity.login();
+//    Forward BOTH values to YOUR server for the token exchange
+//    (@ait-kit/api-core exposes the server-side endpoint) and create the
+//    application session there. The adapter never performs the exchange.
+
+// 2. Anonymous key: { type: "HASH", hash } or a typed error — never a
+//    fabricated key.
+const anon = await identity.getAnonymousKey();
+
+// 3. Storage: string values, verbatim keys.
+const storage = createReactNativeStorage();
+await storage.set("cart:items", "[]");
+const raw = await storage.get("cart:items"); // string | null
+await storage.remove("cart:items");
+```
+
+Contracts:
+
+- **Login** results are validated (`authorizationCode` non-empty, `referrer`
+  one of the documented values) and preserved verbatim. Malformed results
+  reject with `SdkError("INVALID_LOGIN_RESULT")`; unsupported environments
+  with `UNSUPPORTED`; SDK rejections propagate unchanged.
+- **Anonymous key** results must be the documented `{ type: "HASH", hash }`
+  shape. Anything else (including sentinel values) rejects with
+  `SdkError("INVALID_ANONYMOUS_KEY")` — the adapter never invents a key.
+- **Storage** keys and string values pass through byte-for-byte: no
+  namespace prefixing, no key transformation. Compose namespaced keys
+  yourself (e.g. `cart:items`). `get` resolves `null` for missing keys;
+  `set`/`remove` rejections propagate so failures stay observable.
+- **No environment guessing**: the defaults never substitute a fake login
+  or storage based on the runtime. For development, inject an explicit
+  replacement via the `framework` option.
+- Session invalidation when the anonymous identifier changes, migration of
+  previously stored keys, and bootstrap sequencing stay with the consumer.
 
 ## React Native full-screen ads
 
