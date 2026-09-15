@@ -67,11 +67,15 @@ function fakeIapPlatform() {
     },
     async completeProductGrant(args: { params: { orderId: string } }) {
       completedGrants.push(args.params.orderId);
+      if (completeGrantError) {
+        throw completeGrantError;
+      }
       return completeGrantResult;
     }
   };
   let pendingOrders: IapPendingOrder[] = [];
   let completeGrantResult = true;
+  let completeGrantError: unknown;
   return {
     platform,
     purchases,
@@ -81,6 +85,9 @@ function fakeIapPlatform() {
     },
     setCompleteGrantResult: (value: boolean) => {
       completeGrantResult = value;
+    },
+    setCompleteGrantError: (error: unknown) => {
+      completeGrantError = error;
     }
   };
 }
@@ -355,6 +362,83 @@ describe("@ait-kit/sdk IAP adapters", () => {
 
     expect(result).toMatchObject({ status: "notify_failed", orderId: "pending-1" });
     expect(grants.calls).toHaveLength(1);
+  });
+
+  test("converts a rejected completion notification to notify_failed", async () => {
+    const fake = fakeIapPlatform();
+    fake.setCompleteGrantError(new Error("bridge down"));
+    const iap = createReactNativeIap({ framework: fake.platform, grant: async () => {} });
+
+    const result = await iap.recoverPendingOrder({
+      orderId: "pending-1",
+      sku: "SKU_COINS",
+      paymentCompletedDate: "2026-01-01T00:00:00Z"
+    });
+
+    expect(result).toMatchObject({
+      status: "notify_failed",
+      orderId: "pending-1",
+      reason: expect.stringContaining("bridge down")
+    });
+  });
+
+  test("bounds the purchase deadline across platform loading", async () => {
+    const iap = createReactNativeIap({
+      framework: () => new Promise(() => {}), // loader never resolves
+      grant: async () => {},
+      purchaseTimeoutMs: 20
+    });
+
+    await expect(iap.purchaseOneTime("SKU_COINS")).resolves.toMatchObject({
+      status: "unknown",
+      reason: expect.stringContaining("timed out")
+    });
+  });
+
+  test("a loader resolving after the deadline never registers the purchase", async () => {
+    const fake = fakeIapPlatform();
+    let resolveLoader!: (value: { available: true; module: typeof fake.platform }) => void;
+    const iap = createReactNativeIap({
+      framework: () =>
+        new Promise((resolve) => {
+          resolveLoader = resolve;
+        }),
+      grant: async () => {},
+      purchaseTimeoutMs: 20
+    });
+
+    const promise = iap.purchaseOneTime("SKU_COINS");
+    await expect(promise).resolves.toMatchObject({ status: "unknown" });
+
+    // Late resolution must not register a purchase for the expired flow.
+    resolveLoader({ available: true, module: fake.platform });
+    await Bun.sleep(5);
+    expect(fake.purchases).toHaveLength(0);
+  });
+
+  test("reports the observed order id when the grant is still pending at timeout", async () => {
+    const fake = fakeIapPlatform();
+    let releaseGrant!: () => void;
+    const iap = createReactNativeIap({
+      framework: fake.platform,
+      grant: () =>
+        new Promise((resolve) => {
+          releaseGrant = resolve;
+        }),
+      purchaseTimeoutMs: 20
+    });
+
+    const promise = iap.purchaseOneTime("SKU_COINS");
+    await Bun.sleep(1);
+    const captured = fake.purchases[0];
+    void captured.processProductGrant({ orderId: "order-9", subscriptionId: "sub-1" });
+
+    await expect(promise).resolves.toMatchObject({
+      status: "unknown",
+      orderId: "order-9",
+      subscriptionId: "sub-1"
+    });
+    releaseGrant();
   });
 
   test("lists products and reports unsupported operations", async () => {

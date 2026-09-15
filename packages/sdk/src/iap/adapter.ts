@@ -76,22 +76,20 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
     },
 
     purchaseOneTime(sku: string) {
-      return (async () => {
-        const platform = await load();
+      return purchaseWithDeadline(async (platform, remainingMs) => {
         ensureSupported(platform.createOneTimePurchaseOrder, "one-time purchases");
         return await runPurchaseFlow({
           platform,
           coordinator,
           sku,
           subscription: false,
-          timeoutMs: purchaseTimeoutMs
+          timeoutMs: remainingMs
         });
-      })();
+      });
     },
 
     purchaseSubscription(sku: string, offerId?: string) {
-      return (async () => {
-        const platform = await load();
+      return purchaseWithDeadline(async (platform, remainingMs) => {
         ensureSupported(platform.createSubscriptionPurchaseOrder, "subscription purchases");
         return await runPurchaseFlow({
           platform,
@@ -99,9 +97,9 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
           sku,
           ...(offerId !== undefined ? { offerId } : {}),
           subscription: true,
-          timeoutMs: purchaseTimeoutMs
+          timeoutMs: remainingMs
         });
-      })();
+      });
     },
 
     async getPendingOrders() {
@@ -121,17 +119,83 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
         const reason = error instanceof Error ? error.message : String(error);
         return { status: "grant_failed", orderId: order.orderId, reason };
       }
-      const notified = await platform.completeProductGrant({
-        params: { orderId: order.orderId }
-      });
-      if (!notified) {
+      const notified = await notifyGrantComplete(platform, order.orderId);
+      if (!notified.ok) {
         return {
           status: "notify_failed",
           orderId: order.orderId,
-          reason: "completeProductGrant returned false; retry — the server grant is already confirmed in this scope"
+          reason: notified.reason
         };
       }
       return { status: "completed", orderId: order.orderId };
     }
   };
+
+  /**
+   * Runs a purchase under one overall deadline that also covers platform
+   * loading. Only the loading phase races the outer deadline — the purchase
+   * flow owns the remaining budget exclusively, so its order-aware timeout
+   * result is never preempted by a generic one. A stalled loader cannot
+   * wedge checkout, and a loader resolving after the deadline never
+   * registers the purchase.
+   */
+  async function purchaseWithDeadline(
+    run: (platform: IapPlatformSdk, remainingMs: number) => Promise<IapPurchaseResult>
+  ): Promise<IapPurchaseResult> {
+    const timedOut = (): IapPurchaseResult => ({
+      status: "unknown",
+      reason:
+        "purchase flow timed out; the server grant may still be in progress — verify the order server-side and recover it via pending orders"
+    });
+    if (!(purchaseTimeoutMs > 0)) {
+      return run(await load(), 0);
+    }
+    const startedAt = Date.now();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loadDeadline = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        cancelled = true;
+        resolve(null);
+      }, purchaseTimeoutMs);
+    });
+    let platform: IapPlatformSdk | null;
+    try {
+      platform = await Promise.race([
+        load().then((loaded) => (cancelled ? null : loaded)),
+        loadDeadline
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    if (!platform) {
+      return timedOut();
+    }
+    const remainingMs = Math.max(1, purchaseTimeoutMs - (Date.now() - startedAt));
+    return run(platform, remainingMs);
+  }
+}
+
+async function notifyGrantComplete(
+  platform: IapPlatformSdk,
+  orderId: string
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  let notified: boolean;
+  try {
+    notified = await platform.completeProductGrant({ params: { orderId } });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      reason: `completeProductGrant rejected: ${reason}; retry — the server grant is already confirmed in this scope`
+    };
+  }
+  if (!notified) {
+    return {
+      ok: false,
+      reason:
+        "completeProductGrant returned false; retry — the server grant is already confirmed in this scope"
+    };
+  }
+  return { ok: true };
 }

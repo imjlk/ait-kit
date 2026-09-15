@@ -33,10 +33,15 @@ const iap = createReactNativeIap({
   // server verified the order with the provider and persisted the grant
   // (see @ait-kit/api-core's iapOrderStatus for server-side verification).
   grant: async ({ orderId, sku }) => {
-    await fetch("/api/iap/grant", {
+    const response = await fetch("/api/iap/grant", {
       method: "POST",
       body: JSON.stringify({ orderId, sku })
     });
+    if (!response.ok) {
+      // Resolve-only-on-success is part of the contract: never report a
+      // grant your server did not verify and persist.
+      throw new Error(`grant request failed: HTTP ${response.status}`);
+    }
   }
 });
 

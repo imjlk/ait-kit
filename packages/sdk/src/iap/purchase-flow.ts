@@ -46,6 +46,8 @@ export function runPurchaseFlow(options: PurchaseFlowOptions): Promise<IapPurcha
   const { platform, coordinator, sku, offerId, subscription, timeoutMs } = options;
 
   // Per-flow state, shared by the register callbacks and the reducer.
+  let observedOrderId: string | undefined;
+  let observedSubscriptionId: string | undefined;
   let confirmedOrderId: string | undefined;
   let confirmedSubscriptionId: string | undefined;
   let stashedSuccess: IapPurchaseSuccessInfo | undefined;
@@ -85,12 +87,20 @@ export function runPurchaseFlow(options: PurchaseFlowOptions): Promise<IapPurcha
     timeoutMs,
     onTimeout: () => ({
       status: "unknown",
-      orderId: confirmedOrderId ?? stashedSuccess?.orderId,
+      // Include the order the platform already handed to the grant slot,
+      // even when the grant itself has not settled — consumers need it to
+      // verify and recover the uncertain purchase.
+      orderId: confirmedOrderId ?? observedOrderId ?? stashedSuccess?.orderId,
+      ...(observedSubscriptionId !== undefined || confirmedSubscriptionId !== undefined
+        ? { subscriptionId: confirmedSubscriptionId ?? observedSubscriptionId }
+        : {}),
       reason:
         "purchase flow timed out; the server grant may still be in progress — verify the order server-side and recover it via pending orders"
     }),
     register: (emit) => {
       const processProductGrant = async (params: { orderId: string; subscriptionId?: string }) => {
+        observedOrderId = params.orderId;
+        observedSubscriptionId = params.subscriptionId;
         try {
           await coordinator.run({
             orderId: params.orderId,
