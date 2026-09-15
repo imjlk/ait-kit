@@ -3,6 +3,8 @@ export type {
   HealthResponse,
   IapOrderStatusInput,
   IapOrderStatusResponse,
+  IapSkuCheckStatus,
+  IapVerificationCode,
   MtlsClient,
   MtlsClientFactory,
   PromotionRewardGrantInput,
