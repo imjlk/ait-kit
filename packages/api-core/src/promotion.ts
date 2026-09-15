@@ -260,15 +260,19 @@ export async function executePromotionReward(
   }
 
   if (!httpStatusOk(executeResponse.status) || isUpstreamFailure(executeResponse.body)) {
-    const providerErrorCode = upstreamFailureCode(executeResponse.body);
+    // Strict scalar read: a malformed errorCode (arrays, objects) never
+    // upgrades a payload into a coded, definite verdict.
+    const providerErrorCode = strictUpstreamFailureCode(executeResponse.body);
     const definiteRejection =
-      (httpStatusOk(executeResponse.status) && isUpstreamFailure(executeResponse.body) && providerErrorCode !== undefined) ||
+      (httpStatusOk(executeResponse.status) &&
+        strictResultType(executeResponse.body) === "FAIL" &&
+        providerErrorCode !== undefined) ||
       (executeResponse.status >= 400 && executeResponse.status < 500);
     // A FAIL envelope with an error code (or a 4xx) is the provider's
     // explicit verdict for this call — including 4113 "already granted/
     // retracted", which callers should resolve through the status step
-    // rather than by re-executing. 5xx and codeless payloads stay UNKNOWN:
-    // the request may or may not have been applied.
+    // rather than by re-executing. 5xx, codeless, and malformed payloads
+    // stay UNKNOWN: the request may or may not have been applied.
     if (definiteRejection) {
       return {
         ok: false,
@@ -288,19 +292,17 @@ export async function executePromotionReward(
     };
   }
 
-  const resultType = String(
-    readPathString(executeResponse.body, ["resultType", "success.resultType", "data.resultType"]) ?? ""
-  ).toUpperCase();
-  if (resultType && resultType !== "SUCCESS") {
+  const executeResultType = strictResultType(executeResponse.body);
+  if (executeResultType && executeResultType !== "SUCCESS") {
     return {
       ok: true,
       result: "UNKNOWN",
       providerTransactionKey,
-      failureReason: `unexpected promotion execute envelope: ${resultType}`,
+      failureReason: `unexpected promotion execute envelope: ${executeResultType}`,
       upstreamStatus: executeResponse.status
     };
   }
-  if (!resultType) {
+  if (!executeResultType) {
     return {
       ok: true,
       result: "UNKNOWN",
@@ -366,10 +368,15 @@ export async function statusPromotionReward(
   }
 
   if (!httpStatusOk(resultResponse.status) || isUpstreamFailure(resultResponse.body)) {
-    const providerErrorCode = upstreamFailureCode(resultResponse.body);
-    // Map 4111 only for an expected provider verdict (2xx + FAIL envelope):
-    // a 5xx that happens to carry the code has an uncertain outcome.
-    if (httpStatusOk(resultResponse.status) && isUpstreamFailure(resultResponse.body) && providerErrorCode === "4111") {
+    const providerErrorCode = strictUpstreamFailureCode(resultResponse.body);
+    // Map 4111 only for an explicit provider verdict (2xx + resultType FAIL
+    // with a scalar code): 5xx payloads that happen to carry the code, and
+    // malformed envelopes, have an uncertain outcome.
+    if (
+      httpStatusOk(resultResponse.status) &&
+      strictResultType(resultResponse.body) === "FAIL" &&
+      providerErrorCode === "4111"
+    ) {
       // Documented meaning: no grant record exists for this key.
       return {
         ok: true,
@@ -390,9 +397,7 @@ export async function statusPromotionReward(
 
   // Only a verdict inside an explicit SUCCESS envelope counts; a 2xx payload
   // without one (or with an unrecognized resultType) stays UNKNOWN.
-  const resultType = String(
-    readPathString(resultResponse.body, ["resultType", "success.resultType", "data.resultType"]) ?? ""
-  ).trim().toUpperCase();
+  const resultType = strictResultType(resultResponse.body);
   if (resultType !== "SUCCESS") {
     return unknownStatus(providerTransactionKey, options, {
       failureReason: resultType
@@ -424,21 +429,49 @@ export async function statusPromotionReward(
 
 /**
  * Strict mapping for the status step: only the documented provider enums
- * (`SUCCESS`, `PENDING`, `FAILED`) produce a verdict. Unlike the legacy
+ * (`SUCCESS`, `PENDING`, `FAILED`) produce a verdict, and only from real
+ * string evidence — coerced arrays or objects never count. Unlike the legacy
  * grant flow (which treats unrecognized values as FAILED and accepts extra
  * aliases), anything else returns undefined so the caller sees UNKNOWN.
  */
 function strictPromotionStatus(value: unknown): "GRANTED" | "PENDING" | "FAILED" | undefined {
   const success = readPathValue(value, ["success"]);
   const raw =
-    (typeof success === "string" ? success : undefined) ||
-    readPathString(value, ["success.status", "status", "data.status", "data.success"]) ||
-    "";
+    typeof success === "string"
+      ? success
+      : readPathValue(value, ["success.status", "status", "data.status", "data.success"]);
+  if (typeof raw !== "string") return undefined;
   const status = raw.trim().toUpperCase();
   if (status === "SUCCESS") return "GRANTED";
   if (status === "PENDING") return "PENDING";
   if (status === "FAILED") return "FAILED";
   return undefined;
+}
+
+/**
+ * Strict scalar error-code read for the explicit promotion steps: coerced
+ * values like "[object Object]" never classify a response as a coded verdict.
+ */
+function strictUpstreamFailureCode(value: unknown): string | undefined {
+  const raw = readPathValue(value, [
+    "providerErrorCode",
+    "errorCode",
+    "code",
+    "error.errorCode",
+    "error.code",
+    "success.errorCode",
+    "data.errorCode",
+    "data.code"
+  ]);
+  if (typeof raw === "string" && raw.trim()) return raw;
+  if (typeof raw === "number" && Number.isFinite(raw)) return String(raw);
+  return undefined;
+}
+
+/** Strict resultType read: only a real string counts. */
+function strictResultType(value: unknown): string {
+  const raw = readPathValue(value, ["resultType", "success.resultType", "data.resultType"]);
+  return typeof raw === "string" ? raw.trim().toUpperCase() : "";
 }
 
 /**

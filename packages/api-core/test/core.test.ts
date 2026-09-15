@@ -1333,6 +1333,54 @@ describe("@ait-kit/api-core", () => {
       }
     );
 
+    test.each([
+      ["an array status", { resultType: "SUCCESS", success: { status: ["SUCCESS"] } }],
+      ["an object status", { resultType: "SUCCESS", success: { status: { code: "SUCCESS" } } }],
+      ["an array resultType", { resultType: ["SUCCESS"], success: "SUCCESS" }]
+    ] as const)("treats coerced evidence (%s) as UNKNOWN", async (_label, body) => {
+      const { api } = recordingApi(async () => Response.json(body));
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({ ok: true, status: "UNKNOWN" });
+    });
+
+    test("treats a FAIL envelope with a malformed error code as UNKNOWN", async () => {
+      const { api } = recordingApi(async () =>
+        Response.json({ resultType: "FAIL", error: { errorCode: {}, reason: "malformed" } })
+      );
+
+      const response = await api.promotionExecuteReward({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        amount: 1000,
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({ ok: true, result: "UNKNOWN" });
+      expect(response).not.toHaveProperty("providerErrorCode");
+    });
+
+    test.each([
+      ["no resultType", { ok: false, error: { errorCode: "4111", reason: "x" } }],
+      ["an ERROR resultType", { resultType: "ERROR", error: { errorCode: "4111", reason: "x" } }],
+      ["an array errorCode", { resultType: "FAIL", error: { errorCode: ["4111"], reason: "x" } }]
+    ] as const)("keeps 4111 with %s as UNKNOWN, not NOT_FOUND", async (_label, body) => {
+      const { api } = recordingApi(async () => Response.json(body));
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({ ok: true, status: "UNKNOWN" });
+    });
+
     test("keeps a 5xx response carrying error 4111 as UNKNOWN", async () => {
       const { api } = recordingApi(async () =>
         Response.json(
