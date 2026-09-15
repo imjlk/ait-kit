@@ -118,6 +118,15 @@ function fakeRpc(
     async promotionRewardGrant() {
       return { ok: true, providerStatus: "GRANTED" };
     },
+    async promotionPrepareReward() {
+      return { ok: true, providerTransactionKey: "transaction-key" };
+    },
+    async promotionExecuteReward() {
+      return { ok: true, result: "SUBMITTED", providerTransactionKey: "transaction-key" };
+    },
+    async promotionRewardStatus() {
+      return { ok: true, status: "PENDING", providerTransactionKey: "transaction-key", checkedAt: 0 };
+    },
     async smartMessageSend() {
       return { ok: true, providerStatus: "SENT" };
     },

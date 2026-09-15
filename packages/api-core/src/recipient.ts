@@ -81,6 +81,17 @@ function invalidRecipientValue(errorCode: string, errorContext: string, message:
   return clientError(errorCode, `${errorContext}: ${message}`, 400);
 }
 
+/**
+ * Converts a recipient into the request headers the server APIs expect
+ * (`x-toss-user-key` for users, `x-anon-key` for anonymous recipients).
+ * Values pass through byte-for-byte.
+ */
+export function recipientIdentifierHeaders(recipient: MessageRecipient): Record<string, string> {
+  return recipient.kind === "user"
+    ? { "x-toss-user-key": String(recipient.userKey) }
+    : { "x-anon-key": recipient.anonKey };
+}
+
 function recipientUserValue(value: unknown): string | number | undefined {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : undefined;
