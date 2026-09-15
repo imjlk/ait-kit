@@ -1,0 +1,31 @@
+/**
+ * React Native adapters for `@ait-kit/sdk`.
+ *
+ * Requires the official `@apps-in-toss/framework` package (declared as an
+ * optional peer): it is imported lazily at first use, so plain Node bundles
+ * of the root entry never touch React Native code.
+ *
+ * ```ts
+ * import { createReactNativeAds } from "@ait-kit/sdk/rn";
+ *
+ * const ads = createReactNativeAds();
+ * await ads.loadFullScreenAd("AD_GROUP_ID");
+ * const result = await ads.showFullScreenAd("AD_GROUP_ID");
+ * if (result.status === "rewarded") {
+ *   // Verify the reward against your server before crediting anything.
+ * }
+ * ```
+ */
+export {
+  createReactNativeAds,
+  type ReactNativeAds,
+  type ReactNativeAdsOptions,
+  type SdkAdType
+} from "./ads.js";
+export { createDefaultFrameworkLoader, type FrameworkLoader } from "./framework-loader.js";
+export type {
+  FullScreenAdShowEvent,
+  FullScreenAdSupport,
+  LoadFullScreenAdParams,
+  ShowFullScreenAdParams
+} from "./framework-contract.js";

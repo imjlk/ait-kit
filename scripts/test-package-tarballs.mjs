@@ -64,6 +64,10 @@ try {
       // The Node mTLS transport must ship its own runtime + types entry.
       exportPaths.push("./node");
     }
+    if (manifest.name === "@ait-kit/sdk") {
+      // The React Native adapters must ship their own runtime + types entry.
+      exportPaths.push("./rn");
+    }
     for (const exportPath of exportPaths) {
       const importExport = manifest.exports?.[exportPath]?.import;
       const typesExport = manifest.exports?.[exportPath]?.types;
@@ -89,6 +93,7 @@ try {
       tarballPath: join(tempDir, result.filename),
       manifest,
       hasNodeExport: manifest.name === "@ait-kit/api-client",
+      hasRnExport: manifest.name === "@ait-kit/sdk",
       requiresWorkerLoader: packageUsesCloudflareWorkers(packageDir, files)
     });
     console.log(`Packed ${result.name}@${result.version}`);
@@ -182,6 +187,119 @@ try {
 `
       );
       run(process.execPath, [nodeSmokePath], installDir);
+    }
+
+    if (packedPackage.hasRnExport) {
+      // /rn imports cleanly in plain Node without the official RN SDK: the
+      // framework is an optional peer and only imported lazily.
+      const rnSmokePath = join(installDir, "smoke-rn.mjs");
+      writeFileSync(rnSmokePath, `import ${JSON.stringify(`${packedPackage.name}/rn`)};\n`);
+      run(process.execPath, [rnSmokePath], installDir);
+
+      // RN consumer fixture: install the real tarball into a fresh project
+      // (still without @apps-in-toss/framework), then type-check and bundle
+      // a consumer of both entries.
+      const fixtureDir = join(installDir, "rn-fixture");
+      mkdirSync(fixtureDir, { recursive: true });
+      writeFileSync(join(fixtureDir, "package.json"), JSON.stringify({ private: true, type: "module" }));
+      writeFileSync(
+        join(fixtureDir, "consumer.ts"),
+        `import { SdkError, type AdShowResult } from ${JSON.stringify(packedPackage.name)};
+import { createReactNativeAds } from ${JSON.stringify(`${packedPackage.name}/rn`)};
+
+const result: AdShowResult = { status: "dismissed" };
+const ads = createReactNativeAds();
+
+export function consumerCheck(): string {
+  return result.status === "dismissed" ? new SdkError("UNSUPPORTED", "check").code : "impossible";
+}
+
+// The /rn entry must share the root entry's SdkError constructor: without
+// the externalized self-import, independently bundled entries would create
+// two classes and this check would be false.
+export async function crossEntryInstanceofCheck(): Promise<boolean> {
+  try {
+    await ads.loadFullScreenAd("AD_GROUP_ID");
+    return false;
+  } catch (error) {
+    return error instanceof SdkError;
+  }
+}
+export { ads };
+`
+      );
+      run(
+        "npm",
+        [
+          "install",
+          "--ignore-scripts",
+          "--no-package-lock",
+          "--no-audit",
+          "--no-fund",
+          "--prefer-offline",
+          packedPackage.tarballPath,
+          "typescript@6.0.3",
+          "esbuild@0.28.2"
+        ],
+        fixtureDir,
+        installCommandTimeoutMs
+      );
+      run(
+        "npm",
+        [
+          "exec",
+          "--",
+          "tsc",
+          "--noEmit",
+          "--strict",
+          "--target",
+          "es2022",
+          "--module",
+          "esnext",
+          "--moduleResolution",
+          "bundler",
+          "consumer.ts"
+        ],
+        fixtureDir
+      );
+      run(
+        "npm",
+        [
+          "exec",
+          "--",
+          "esbuild",
+          "consumer.ts",
+          "--bundle",
+          "--format=esm",
+          "--platform=node",
+          "--external:@apps-in-toss/framework",
+          "--outfile=consumer.js"
+        ],
+        fixtureDir
+      );
+      // NodeNext consumers resolve the shipped declarations directly; the
+      // emitted d.ts must carry extension-safe specifiers.
+      run(
+        "npm",
+        [
+          "exec",
+          "--",
+          "tsc",
+          "--noEmit",
+          "--strict",
+          "--target",
+          "es2022",
+          "--module",
+          "nodenext",
+          "--moduleResolution",
+          "nodenext",
+          "consumer.ts"
+        ],
+        fixtureDir
+      );
+      // Execute the bundled consumer: the cross-entry instanceof check must
+      // hold at runtime against the installed tarball.
+      run(process.execPath, [join(fixtureDir, "consumer.js")], fixtureDir);
     }
     console.log(`Verified ${packedPackage.name}@${packedPackage.version}`);
   }
