@@ -59,19 +59,28 @@ try {
       }
     }
 
-    const importExport = manifest.exports?.["."]?.import;
-    const typesExport = manifest.exports?.["."]?.types;
-    if (
-      typeof importExport !== "string" ||
-      typeof typesExport !== "string" ||
-      !importExport.startsWith("./") ||
-      !typesExport.startsWith("./")
-    ) {
-      throw new Error(`${result.name} must define string exports["."].import and exports["."].types targets`);
+    const exportPaths = ["."];
+    if (manifest.name === "@ait-kit/api-client") {
+      // The Node mTLS transport must ship its own runtime + types entry.
+      exportPaths.push("./node");
     }
-    for (const exportTarget of [importExport, typesExport]) {
-      if (!files.has(exportTarget.replace(/^\.\//, "")) || !existsSync(join(packageDir, exportTarget))) {
-        throw new Error(`${result.name} export does not exist in its tarball: ${exportTarget}`);
+    for (const exportPath of exportPaths) {
+      const importExport = manifest.exports?.[exportPath]?.import;
+      const typesExport = manifest.exports?.[exportPath]?.types;
+      if (
+        typeof importExport !== "string" ||
+        typeof typesExport !== "string" ||
+        !importExport.startsWith("./") ||
+        !typesExport.startsWith("./")
+      ) {
+        throw new Error(
+          `${result.name} must define string exports[${JSON.stringify(exportPath)}].import and .types targets`
+        );
+      }
+      for (const exportTarget of [importExport, typesExport]) {
+        if (!files.has(exportTarget.replace(/^\.\//, "")) || !existsSync(join(packageDir, exportTarget))) {
+          throw new Error(`${result.name} export does not exist in its tarball: ${exportTarget}`);
+        }
       }
     }
     packedPackages.push({
@@ -79,6 +88,7 @@ try {
       version: result.version,
       tarballPath: join(tempDir, result.filename),
       manifest,
+      hasNodeExport: manifest.name === "@ait-kit/api-client",
       requiresWorkerLoader: packageUsesCloudflareWorkers(packageDir, files)
     });
     console.log(`Packed ${result.name}@${result.version}`);
@@ -142,6 +152,37 @@ register("./cloudflare-worker-resolver.mjs", import.meta.url);
       importArgs.unshift("--no-warnings", "--import", workerRegisterPath);
     }
     run(process.execPath, importArgs, installDir);
+
+    if (packedPackage.hasNodeExport) {
+      // Prove the installed /node entry runs a real request through Node's
+      // https stack in the isolated consumer. Port 9 (discard) is closed, so
+      // the transport must reject with its own typed error — never hang.
+      const nodeSmokePath = join(installDir, "smoke-node.mjs");
+      writeFileSync(
+        nodeSmokePath,
+        `import { createNodeMtlsTransport, NodeMtlsTransportError } from ${JSON.stringify(
+          `${packedPackage.name}/node`
+        )};
+const transport = createNodeMtlsTransport({
+  cert: "-----BEGIN CERTIFICATE-----\\nplaceholder\\n-----END CERTIFICATE-----\\n",
+  key: "-----BEGIN PRIVATE KEY-----\\nplaceholder\\n-----END PRIVATE KEY-----\\n",
+  timeoutMs: 5000
+});
+try {
+  await transport.request("https://127.0.0.1:9/health", { method: "GET" });
+  throw new Error("expected the node transport request to reject");
+} catch (error) {
+  if (!(error instanceof NodeMtlsTransportError)) {
+    throw new Error(\`node transport rejected with an unexpected error: \${error}\`);
+  }
+  if (error.code !== "REQUEST_FAILED") {
+    throw new Error(\`node transport returned code \${error.code}, expected REQUEST_FAILED\`);
+  }
+}
+`
+      );
+      run(process.execPath, [nodeSmokePath], installDir);
+    }
     console.log(`Verified ${packedPackage.name}@${packedPackage.version}`);
   }
 } catch (error) {

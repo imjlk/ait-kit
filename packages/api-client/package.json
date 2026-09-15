@@ -20,12 +20,18 @@
     "http-client",
     "typescript"
   ],
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/node/**"
+  ],
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js"
     }
   },
   "files": [
@@ -33,7 +39,7 @@
   ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && bun build src/index.ts --outfile dist/index.js --format esm --target browser --packages external",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && bun build src/index.ts --outfile dist/index.js --format esm --target browser --packages external && bun build src/node/index.ts --outfile dist/node/index.js --format esm --target node --packages external",
     "test": "bun test test",
     "prepack": "bun run build"
   },
