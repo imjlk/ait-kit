@@ -151,7 +151,7 @@ export function normalizeIapOrderStatusResponse(
     return invalidIapResponse(request, envelopeResultType.reason, upstreamStatus);
   }
   if (envelopeResultType.state === "present") {
-    if (IAP_QUERY_FAILURE_RESULT_TYPES.has(envelopeResultType.value)) {
+    if (IAP_QUERY_FAILURE_RESULT_TYPES.has(envelopeResultType.value.trim().toUpperCase())) {
       return {
         ok: false,
         orderId: stringOrUndefined(request.orderId),
@@ -161,7 +161,7 @@ export function normalizeIapOrderStatusResponse(
         upstreamStatus
       };
     }
-    if (envelopeResultType.value !== "SUCCESS") {
+    if (envelopeResultType.value.trim().toUpperCase() !== "SUCCESS") {
       return invalidIapResponse(
         request,
         `unrecognized resultType for order status: ${envelopeResultType.value}`,

@@ -202,6 +202,10 @@ export function normalizeMessageResponse(
     "data.resultType"
   ]);
   const resultType = envelopeResultType.state === "present" ? envelopeResultType.value : undefined;
+  // Classification uses the normalized enum (trim + case) like the old
+  // isUpstreamFailure logic; the surfaced resultType keeps original bytes.
+  const normalizedResultType =
+    envelopeResultType.state === "present" ? envelopeResultType.value.trim().toUpperCase() : "";
 
   if (!httpStatusOk(upstreamStatus)) {
     // Only 4xx proves the provider rejected the send. 5xx (and abnormal
@@ -256,7 +260,7 @@ export function normalizeMessageResponse(
     );
   }
   if (envelopeResultType.state === "present") {
-    if (MESSAGE_FAILURE_RESULT_TYPES.has(envelopeResultType.value)) {
+    if (MESSAGE_FAILURE_RESULT_TYPES.has(normalizedResultType)) {
       return {
         ok: false,
         providerRequestId,
@@ -273,7 +277,7 @@ export function normalizeMessageResponse(
     // this same set — FAILED, FAIL, ERROR, REJECTED — as failures). EVERY
     // alias is checked, so neither a hidden failure nor a disagreement
     // between aliases can be overridden by counts.
-    if (envelopeResultType.value === "SUCCESS") {
+    if (normalizedResultType === "SUCCESS") {
       const stated = readStatedStatusAliases(upstream);
       if (stated.state === "invalid") {
         return unknownMessageResult(providerRequestId, stated.reason, upstreamStatus, resultType, undefined, sentAtWithoutNow);
@@ -303,7 +307,7 @@ export function normalizeMessageResponse(
         );
       }
     }
-    if (MESSAGE_OUTCOME_UNKNOWN_RESULT_TYPES.has(envelopeResultType.value)) {
+    if (MESSAGE_OUTCOME_UNKNOWN_RESULT_TYPES.has(normalizedResultType)) {
       return unknownMessageResult(
         providerRequestId,
         upstreamFailureReason(upstreamObject),
@@ -313,7 +317,7 @@ export function normalizeMessageResponse(
         sentAtWithoutNow
       );
     }
-    if (envelopeResultType.value !== "SUCCESS") {
+    if (normalizedResultType !== "SUCCESS") {
       return unknownMessageResult(
         providerRequestId,
         `unrecognized resultType for message send: ${envelopeResultType.value}`,

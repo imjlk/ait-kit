@@ -58,6 +58,11 @@ require the SKU comparison before crediting:
 
 ```ts
 const result = await tossApi.iapOrderStatus({ orderId, sku: "SKU_100_COINS" });
+if (!result.ok) {
+  // The lookup itself failed (transport, provider error, INVALID_RESPONSE):
+  // no grant decision can be made from this response.
+  throw new Error(`order status lookup failed: ${result.failureReason ?? result.error}`);
+}
 
 // verified: provider attests a payable status for THIS order.
 // skuCheck: the product evidence matches what the caller expects.

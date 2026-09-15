@@ -2151,6 +2151,26 @@ describe("smart message send-result evidence validation", () => {
     expect(response).not.toMatchObject({ ok: true });
   });
 
+  test("a padded FAIL resultType still classifies as a definite failure", () => {
+    const message = normalizeMessageResponse(
+      {},
+      { resultType: " FAIL ", error: { errorCode: "4008", errorMessage: "invalid recipient" } }
+    );
+    expect(message).toMatchObject({
+      ok: false,
+      providerStatus: "FAILED",
+      providerErrorCode: "4008",
+      failureReason: "invalid recipient"
+    });
+
+    const iap = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: " FAIL ", success: { orderId: "order-id", status: "PAYMENT_COMPLETED" } }
+    );
+    expect(iap).toMatchObject({ ok: false, providerStatus: "ERROR" });
+    expect(iap).not.toMatchObject({ verified: true });
+  });
+
   test("unknown results keep correlation info but never fabricate a sentAt", () => {
     const response = normalizeMessageResponse(
       { providerRequestId: "req-9" },
