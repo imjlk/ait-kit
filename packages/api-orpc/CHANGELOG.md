@@ -1,5 +1,12 @@
 # @ait-kit/api-orpc
 
+## 0.3.0 — 2026-09-15
+
+### Patch changes
+
+- [d003f88](https://github.com/imjlk/ait-kit/commit/d003f88bc3d8c0f00386b6e6f16ef05762a38b66) Update runtime dependencies to their latest versions: `@orpc/server` 1.14.6 → 1.15.0 and `zod` 4.4.3 → 4.6.5. No public API changes. — Thanks @imjlk!
+- Updated dependencies: api-core@0.3.0
+
 ## 0.2.0 — 2026-07-13
 
 ### Minor changes
