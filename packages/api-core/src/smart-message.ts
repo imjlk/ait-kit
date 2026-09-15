@@ -155,9 +155,10 @@ export function normalizeMessageResponse(
   const resultType = envelopeResultType.state === "present" ? envelopeResultType.value : undefined;
 
   if (!httpStatusOk(upstreamStatus)) {
-    // 4xx: the provider definitely rejected the send. 5xx: the outcome is
-    // unknown — the request may or may not have been delivered.
-    const unknown = Number(upstreamStatus) >= 500;
+    // Only 4xx proves the provider rejected the send. 5xx (and abnormal
+    // 1xx/3xx statuses) leave the outcome unknown — the request may or may
+    // not have been delivered.
+    const unknown = !(Number(upstreamStatus) >= 400 && Number(upstreamStatus) < 500);
     return {
       ok: false,
       providerRequestId,
@@ -280,7 +281,10 @@ export function normalizeMessageResponse(
         sentAtWithoutNow
       );
     }
-    const status = normalizedStatus.value.toUpperCase();
+    // This module only ever emits the exact uppercase SENT/FAILED tokens;
+    // case variants or other values cannot be module-produced output and
+    // never skip the send-evidence validation.
+    const status = normalizedStatus.value;
     if (status !== "SENT" && status !== "FAILED") {
       return unknownMessageResult(
         providerRequestId,
@@ -383,7 +387,18 @@ export function normalizeMessageResponse(
   // Failure entries, channel details, and content IDs live in the SAME
   // source as the counts (nested result object or the bare top-level
   // evidence), so a zero-send bare response keeps its failure entries.
-  const failures = collectMessageFailures(countsSource);
+  const failureRead = collectMessageFailures(countsSource);
+  const failures = failureRead.failures;
+  if (failureRead.invalidReason !== undefined) {
+    return unknownMessageResult(
+      providerRequestId,
+      `malformed failure collection: ${failureRead.invalidReason}`,
+      upstreamStatus,
+      resultType,
+      undefined,
+      sentAtWithoutNow
+    );
+  }
   const contentIds = collectMessageContentIds(countsSource.detail);
   const hasCountEvidence = Object.values(countReads).some((read) => read.state === "present");
   if (!hasCountEvidence && failures.length === 0) {
@@ -551,13 +566,35 @@ function messageSentAtWithoutNow(upstreamSentAt: unknown, requestSentAt: unknown
 
 const MESSAGE_RESULT_CHANNELS = ["sentPush", "sentInbox", "sentSms", "sentAlimtalk", "sentFriendtalk"];
 
-function collectMessageFailures(result: unknown) {
+/**
+ * Collects failure entries from the send result. A PRESENT but malformed
+ * failure collection (a channel that is not an array, or entries that are
+ * not objects) is reported as invalid instead of being silently skipped:
+ * explicit failure data that cannot be interpreted must never let the
+ * response pass as a clean SENT.
+ */
+function collectMessageFailures(result: unknown): {
+  failures: Array<{ channel: string; contentId?: string; reachedFailReason?: string }>;
+  invalidReason?: string;
+} {
   const failures: Array<{ channel: string; contentId?: string; reachedFailReason?: string }> = [];
-  const fail = objectOrSelf(objectOrSelf(result, {}).fail, {});
+  const source = objectOrSelf(result, {});
+  const failValue = source.fail;
+  if (failValue === undefined || failValue === null) return { failures };
+  if (typeof failValue !== "object" || Array.isArray(failValue)) {
+    return { failures, invalidReason: "fail was present but was not an object" };
+  }
+  const fail = failValue as Record<string, unknown>;
   for (const channel of MESSAGE_RESULT_CHANNELS) {
-    const entries = Array.isArray(fail[channel]) ? fail[channel] : [];
+    const entries = fail[channel];
+    if (entries === undefined || entries === null) continue;
+    if (!Array.isArray(entries)) {
+      return { failures, invalidReason: `fail.${channel} was present but was not an array` };
+    }
     for (const entry of entries) {
-      if (!entry || typeof entry !== "object") continue;
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        return { failures, invalidReason: `fail.${channel} contained a non-object entry` };
+      }
       failures.push({
         channel,
         contentId: readPathString(entry, ["contentId", "id"]),
@@ -571,7 +608,7 @@ function collectMessageFailures(result: unknown) {
       });
     }
   }
-  return failures;
+  return { failures };
 }
 
 function collectMessageContentIds(detail: unknown) {

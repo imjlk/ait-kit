@@ -2000,6 +2000,43 @@ describe("smart message send-result evidence validation", () => {
     });
   });
 
+  test("lowercase or non-exact normalized status tokens never skip evidence checks", () => {
+    const response = normalizeMessageResponse({}, { providerStatus: "sent" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE"
+    });
+  });
+
+  test("a 3xx response stays UNKNOWN, only 4xx is a definite rejection", () => {
+    const redirect = normalizeMessageResponse({}, {}, 302);
+    expect(redirect).toMatchObject({ ok: false, providerStatus: "UNKNOWN", upstreamStatus: 302 });
+
+    const rejected = normalizeMessageResponse({}, {}, 403);
+    expect(rejected).toMatchObject({ ok: false, providerStatus: "FAILED", upstreamStatus: 403 });
+  });
+
+  test.each([
+    ["a non-array channel", { msgCount: 0, fail: { sentSms: "phone off" } }],
+    ["a non-object entry", { msgCount: 0, fail: { sentSms: ["phone off"] } }],
+    ["a non-object fail", { msgCount: 0, fail: "unavailable" }]
+  ] as const)("rejects %s in the failure collection", (_label, upstream) => {
+    const response = normalizeMessageResponse(
+      {},
+      { resultType: "SUCCESS", success: upstream }
+    );
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE",
+      failureReason: expect.stringContaining("malformed failure collection")
+    });
+    expect(response).not.toMatchObject({ ok: true });
+  });
+
   test("unknown results keep correlation info but never fabricate a sentAt", () => {
     const response = normalizeMessageResponse(
       { providerRequestId: "req-9" },
