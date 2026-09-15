@@ -45,5 +45,40 @@ asked. Grant decisions must gate on `verified`, never on `ok`:
   flows that want to exercise grant logic must explicitly opt in by checking
   `stub: true`.
 
+## Message recipients
+
+`normalizeMessageRecipient` turns legacy `{ userKey, tossUserKey, anonKey }`
+inputs into a single `MessageRecipient` (`{ kind: "user", userKey }` or
+`{ kind: "anonymous", anonKey }`). Exactly one identifier must be supplied:
+requests with none, more than one, values of the wrong type, or empty
+strings are rejected (`INVALID_MESSAGE_RECIPIENT` for single sends,
+`INVALID_CONTEXT_RECIPIENT` for bulk `contextList` items) — identically in
+stub and forward mode. Each API converts the recipient itself:
+
+- **Single (and test) sends** carry the recipient in request headers:
+  `x-toss-user-key` for user recipients, `x-anon-key` for anonymous ones.
+  (Earlier releases emitted `x-user-key`, which the official API does not
+  define; consumer proxy code that rewrote the header can now be removed.)
+- **Bulk sends** carry recipients in `contextList` body fields (`userKey` /
+  `anonKey`), never in headers.
+
+## Anonymous keys and verification
+
+`verifyAnonKey` calls `POST /api-partner/v1/apps-in-toss/users/anon-key/verify`
+with the key in the `x-anon-key` header. Results are tri-state:
+
+- `{ ok: true, valid: true }` / `{ ok: true, valid: false }` — definitive
+  provider verdicts.
+- `{ ok: false, ... }` (`ProviderFailure`) — no verdict was obtained
+  (transport failure, non-2xx, FAIL envelope such as errorCode `4010`,
+  malformed response). Never translate this into `valid: false`.
+
+**Prefixes:** the SDK's `getAnonymousKey()` resolves to `{ type: "HASH",
+hash }` and the `hash` value is the key. Server APIs expect exactly that
+value. Applications that decorate stored identifiers with their own prefix
+(for example `anon:` or `anonymous-`) must strip their own prefix before
+calling; the kit transmits keys byte-for-byte and never adds or removes
+prefixes in either direction.
+
 See the [AIT Kit repository](https://github.com/imjlk/ait-kit) for supported APIs, Cloudflare
 bindings, examples, and release notes.
