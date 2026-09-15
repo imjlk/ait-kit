@@ -1,4 +1,4 @@
-import { requestToss, resolveMtlsClient } from "./mtls-client";
+import { requestToss, resolveMtlsClient, resolveMtlsUrl } from "./mtls-client";
 import { normalizeMessageRecipient, recipientIdentifierHeaders } from "./recipient";
 import {
   AppsInTossApiError,
@@ -184,17 +184,25 @@ export async function preparePromotionReward(
       upstreamStatus: keyResponse.status
     };
   }
-  const providerTransactionKey = readPathString(keyResponse.body, ["success.key", "key", "data.key"]);
-  if (!providerTransactionKey) {
+  const keyResultType = String(
+    readPathString(keyResponse.body, ["resultType", "success.resultType", "data.resultType"]) ?? ""
+  ).trim().toUpperCase();
+  const rawKey = readPathValue(keyResponse.body, ["success.key", "key", "data.key"]);
+  // Only an explicit SUCCESS envelope carrying a real string is provider
+  // evidence; coerced numeric or object values never become keys.
+  if (keyResultType !== "SUCCESS" || typeof rawKey !== "string" || !rawKey.trim()) {
     return {
       ok: false,
       providerStatus: "ERROR",
-      error: "PROMOTION_KEY_MISSING",
-      failureReason: "Promotion get-key response did not include key",
+      error: "INVALID_RESPONSE",
+      failureReason:
+        keyResultType === "SUCCESS"
+          ? "Promotion get-key response did not include a string key"
+          : "Promotion get-key response was not a SUCCESS envelope",
       upstreamStatus: keyResponse.status
     };
   }
-  return { ok: true, providerTransactionKey };
+  return { ok: true, providerTransactionKey: rawKey };
 }
 
 /**
@@ -218,10 +226,11 @@ export async function executePromotionReward(
     return { ok: true, result: "SUBMITTED", providerTransactionKey, stub: true };
   }
 
-  // Resolve the transport before the dispatch window so configuration and
-  // factory failures propagate: they happen before anything is sent and must
-  // not masquerade as an uncertain outcome.
+  // Resolve the transport and URL before the dispatch window so configuration
+  // and factory failures propagate: they happen before anything is sent and
+  // must not masquerade as an uncertain outcome.
   const mtlsClient = await resolveMtlsClient(options);
+  resolveMtlsUrl(TOSS_ENDPOINTS.promotionExecute, options);
   const dispatchOptions = { ...options, mtlsClient };
 
   let executeResponse;
@@ -332,6 +341,7 @@ export async function statusPromotionReward(
   // Same pre-dispatch resolution as execute: factory/configuration failures
   // are never outcome-ambiguous.
   const mtlsClient = await resolveMtlsClient(options);
+  resolveMtlsUrl(TOSS_ENDPOINTS.promotionResult, options);
   const dispatchOptions = { ...options, mtlsClient };
 
   let resultResponse;
@@ -473,7 +483,18 @@ function resolvePromotionAmount(
     }
     return raw;
   }
-  if (options.tossPromotionAmount) return options.tossPromotionAmount;
+  if (options.tossPromotionAmount !== undefined) {
+    const configured = options.tossPromotionAmount;
+    // The configured fallback obeys the same constraints as request values:
+    // Infinity serializes as null and negatives/fractions are invalid grants.
+    if (typeof configured !== "number" || !Number.isInteger(configured) || configured <= 0) {
+      throw clientError(
+        "INVALID_PROMOTION_AMOUNT",
+        `configured tossPromotionAmount must be a positive integer to ${action}`
+      );
+    }
+    return configured;
+  }
   throw clientError("MISSING_PROMOTION_AMOUNT", `amount is required to ${action}`);
 }
 

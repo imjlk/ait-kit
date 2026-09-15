@@ -1112,6 +1112,73 @@ describe("@ait-kit/api-core", () => {
       expect(bodies[0]).toBeUndefined();
     });
 
+    test.each([
+      ["no SUCCESS envelope", { key: "transaction-key" }, "was not a SUCCESS envelope"],
+      ["a coerced numeric key", { resultType: "SUCCESS", success: { key: 123 } }, "did not include a string key"]
+    ] as const)(
+      "prepare rejects a get-key response with %s",
+      async (_label, body, reasonFragment) => {
+        const { api } = recordingApi(async () => Response.json(body));
+
+        const response = await api.promotionPrepareReward({});
+
+        expect(response).toMatchObject({
+          ok: false,
+          error: "INVALID_RESPONSE",
+          failureReason: expect.stringContaining(reasonFragment)
+        });
+      }
+    );
+
+    test.each([-1, 1.5, Infinity] as const)(
+      "rejects the configured tossPromotionAmount %s",
+      async (configured) => {
+        const { api, paths } = recordingApi(
+          async () => Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } }),
+          { tossPromotionAmount: configured }
+        );
+
+        await expect(
+          api.promotionExecuteReward({
+            providerTransactionKey: "transaction-key",
+            promotionCode: "promo",
+            tossUserKey: "user"
+          })
+        ).rejects.toMatchObject({ code: "INVALID_PROMOTION_AMOUNT", status: 400 });
+        expect(paths).toEqual([]);
+      }
+    );
+
+    test("propagates invalid upstream URL configuration before dispatch", async () => {
+      const api = createAppsInTossApiRpc(
+        createAppsInTossApi({
+          mode: "forward",
+          upstreamBaseUrl: "not a url",
+          mtlsClient: {
+            async request() {
+              throw new Error("requests must not be dispatched with a broken upstream URL");
+            }
+          }
+        })
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          amount: 1000,
+          tossUserKey: "user"
+        })
+      ).rejects.toThrow(TypeError);
+      await expect(
+        api.promotionRewardStatus({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          tossUserKey: "user"
+        })
+      ).rejects.toThrow(TypeError);
+    });
+
     test("execute requires a key and never issues one", async () => {
       const missing = createAppsInTossApiRpc(createAppsInTossApi({ mode: "forward" }));
       await expect(
