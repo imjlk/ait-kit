@@ -34,7 +34,9 @@ export type SharePlatformLoader = () => Promise<
  * before dispatching; the resolved share link passes through verbatim.
  */
 export function validateSharePath(path: string): string {
-  if (typeof path !== "string" || !path.trim().startsWith("intoss://")) {
+  // The path is dispatched verbatim, so surrounding whitespace must be
+  // rejected rather than silently trimmed away.
+  if (typeof path !== "string" || !/^intoss:\/\/\S*$/.test(path)) {
     throw new SdkError(
       "INVALID_SHARE_PATH",
       `share link path must be an intoss:// deeplink, received: ${String(path)}`

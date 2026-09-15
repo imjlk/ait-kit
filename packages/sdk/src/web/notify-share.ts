@@ -37,28 +37,13 @@ export function createWebNotification(options: WebNotificationOptions = {}): Web
   const loader = normalizeWebNotificationLoader(options.framework);
   const timeoutMs = options.timeoutMs ?? DEFAULT_AGREEMENT_TIMEOUT_MS;
   return {
-    async requestAgreement(templateCode: string) {
+    requestAgreement(templateCode: string): Promise<SdkNotificationAgreementResult> {
       if (typeof templateCode !== "string" || !templateCode.trim()) {
-        throw new SdkError("UNSUPPORTED", "templateCode must be a non-empty string");
-      }
-      const result = await loader();
-      if (!result.available) {
-        throw new SdkError("SDK_UNAVAILABLE", result.reason);
-      }
-      const request = result.module.Notification?.requestAgreement;
-      if (typeof request !== "function") {
-        throw new SdkError(
-          "UNSUPPORTED",
-          "the installed SDK does not expose Notification.requestAgreement"
+        return Promise.reject(
+          new SdkError("UNSUPPORTED", "templateCode must be a non-empty string")
         );
       }
-      if (typeof request.isSupported === "function" && !request.isSupported()) {
-        throw new SdkError(
-          "UNSUPPORTED",
-          "notification agreements are not supported on this app version"
-        );
-      }
-      return runRequestAgreement(result.module, templateCode, timeoutMs);
+      return agreementWithLoaderDeadline(loader, templateCode, timeoutMs);
     }
   };
 }
@@ -168,4 +153,69 @@ function createDefaultWebModuleLoader<T>(): () => Promise<
       };
     }
   };
+}
+
+/**
+ * Same loader-covering deadline as the React Native adapter; see
+ * agreementWithLoaderDeadline there for the contract.
+ */
+async function agreementWithLoaderDeadline(
+  loader: NotificationPlatformLoader,
+  templateCode: string,
+  timeoutMs: number
+): Promise<SdkNotificationAgreementResult> {
+  const timedOut = (): SdkNotificationAgreementResult => ({
+    status: "timeout",
+    templateCode,
+    reason: `agreement request timed out after ${timeoutMs}ms; the user may still act — resolve the state server-side before retrying`
+  });
+  if (!(timeoutMs > 0)) {
+    return runRequestAgreement(await loadNotificationPlatform(loader), templateCode, 0);
+  }
+  const startedAt = Date.now();
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const loadDeadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      cancelled = true;
+      resolve(null);
+    }, timeoutMs);
+  });
+  let platform: NotificationPlatformSdk | null;
+  try {
+    platform = await Promise.race([
+      loadNotificationPlatform(loader).then((loaded) => (cancelled ? null : loaded)),
+      loadDeadline
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+  if (!platform || cancelled || Date.now() - startedAt >= timeoutMs) {
+    return timedOut();
+  }
+  const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
+  return runRequestAgreement(platform, templateCode, remainingMs);
+}
+
+async function loadNotificationPlatform(
+  loader: NotificationPlatformLoader
+): Promise<NotificationPlatformSdk> {
+  const result = await loader();
+  if (!result.available) {
+    throw new SdkError("SDK_UNAVAILABLE", result.reason);
+  }
+  const request = result.module.Notification?.requestAgreement;
+  if (typeof request !== "function") {
+    throw new SdkError(
+      "UNSUPPORTED",
+      "the installed SDK does not expose Notification.requestAgreement"
+    );
+  }
+  if (typeof request.isSupported === "function" && !request.isSupported()) {
+    throw new SdkError(
+      "UNSUPPORTED",
+      "notification agreements are not supported on this app version"
+    );
+  }
+  return result.module;
 }

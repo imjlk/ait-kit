@@ -29,7 +29,7 @@ export type NotificationPlatformLoader = () => Promise<
 >;
 
 type AgreementFlowEvent =
-  | { kind: "agreement"; type: string; sourceEvent: { type: string } }
+  | { kind: "agreement"; type: string; sourceEvent: Record<string, unknown> & { type: string } }
   | { kind: "sdkError"; error: unknown };
 
 const TERMINAL_AGREEMENTS = new Set(["newAgreement", "alreadyAgreed", "agreementRejected"]);
@@ -58,7 +58,13 @@ export function runRequestAgreement(
       platform.Notification!.requestAgreement!({
         options: { templateCode },
         onEvent: (result) => {
-          emit({ kind: "agreement", type: result.type, sourceEvent: { type: result.type } });
+          // Preserve the platform's raw event object verbatim (including
+          // any metadata beyond `type`) per the public contract.
+          emit({
+            kind: "agreement",
+            type: result.type,
+            sourceEvent: result as Record<string, unknown> & { type: string }
+          });
         },
         onError: (error) => {
           emit({ kind: "sdkError", error });

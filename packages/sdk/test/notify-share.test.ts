@@ -150,6 +150,40 @@ describe("@ait-kit/sdk notification agreement", () => {
     });
   });
 
+  test("bounds the agreement deadline across platform loading", async () => {
+    const notification = createReactNativeNotification({
+      framework: () => new Promise(() => {}), // loader never resolves
+      timeoutMs: 20
+    });
+
+    await expect(notification.requestAgreement("TEMPLATE_1")).resolves.toMatchObject({
+      status: "timeout",
+      templateCode: "TEMPLATE_1"
+    });
+  });
+
+  test("preserves platform event metadata in sourceEvent", async () => {
+    const requests: Array<{ emit: (result: unknown) => void }> = [];
+    const platform = {
+      Notification: {
+        requestAgreement: (params: { onEvent: (result: unknown) => void }) => {
+          requests.push({ emit: params.onEvent });
+          return () => {};
+        }
+      }
+    };
+    const notification = createReactNativeNotification({ framework: platform as never });
+
+    const promise = notification.requestAgreement("TEMPLATE_1");
+    await Bun.sleep(1);
+    requests[0].emit({ type: "newAgreement", extra: "metadata" });
+
+    await expect(promise).resolves.toMatchObject({
+      status: "agreed",
+      sourceEvent: { type: "newAgreement", extra: "metadata" }
+    });
+  });
+
   test("web notification rejects with SDK_UNAVAILABLE without the web SDK", async () => {
     const notification = createWebNotification({
       framework: async () => ({ available: false, reason: "web sdk missing" })
@@ -173,6 +207,17 @@ describe("@ait-kit/sdk share", () => {
     expect(fake.seenLinks[1]).toEqual({
       path: "intoss://my-app",
       ogImageUrl: "https://cdn.example/og.png"
+    });
+  });
+
+  test("rejects whitespace-padded deeplink paths", async () => {
+    const share = createReactNativeShare({ framework: fakeSharePlatform().platform });
+
+    await expect(share.createLink(" intoss://my-app")).rejects.toMatchObject({
+      code: "INVALID_SHARE_PATH"
+    });
+    await expect(share.createLink("intoss://my-app ")).rejects.toMatchObject({
+      code: "INVALID_SHARE_PATH"
     });
   });
 
