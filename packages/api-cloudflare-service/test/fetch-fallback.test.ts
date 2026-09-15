@@ -51,6 +51,23 @@ describe("Cloudflare HTTP fallback", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, providerStatus: "GRANTED" });
   });
+
+  test("dispatches the authenticated anon key verify route", async () => {
+    const headers = new Headers({ "content-type": "application/json" });
+    headers.set("authorization", "Bearer expected-token");
+    const response = await handleFetchFallback(
+      new Request("https://service.example/internal/apps-in-toss/users/anon-key/verify", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ anonKey: "anon-hash" })
+      }),
+      fakeRpc(),
+      { bearerToken: "expected-token" }
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, valid: true });
+  });
 });
 
 function promotionRequest(providedToken?: string, expectedToken?: string) {
@@ -94,6 +111,9 @@ function fakeRpc(
     },
     async iapOrderStatus() {
       return { ok: true, verified: true, orderId: "order-id", providerStatus: "PURCHASED" };
+    },
+    async verifyAnonKey() {
+      return { ok: true, valid: true };
     },
     async promotionRewardGrant() {
       return { ok: true, providerStatus: "GRANTED" };

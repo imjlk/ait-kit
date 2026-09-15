@@ -12,6 +12,7 @@ export const TOSS_ENDPOINTS = Object.freeze({
   promotionExecute: "/api-partner/v1/apps-in-toss/promotion/execute-promotion",
   promotionResult: "/api-partner/v1/apps-in-toss/promotion/execution-result",
   iapOrderStatus: "/api-partner/v1/apps-in-toss/order/get-order-status",
+  anonKeyVerify: "/api-partner/v1/apps-in-toss/users/anon-key/verify",
   messageSend: "/api-partner/v1/apps-in-toss/messenger/send-message",
   messageBulkSend: "/api-partner/v1/apps-in-toss/messenger/send-bulk-message"
 });
@@ -250,6 +251,37 @@ export type PromotionRewardGrantResponse =
       providerErrorCode?: string;
     };
 
+/**
+ * Input for the anonymous key verification API.
+ *
+ * The official endpoint receives the key in the `x-anon-key` request header
+ * and carries the raw value through unchanged; see {@link AnonKeyVerifyResponse}.
+ */
+export interface AnonKeyVerifyInput {
+  anonKey?: string;
+}
+
+/**
+ * Result of verifying an anonymous key against the provider.
+ *
+ * `ok: true` with `valid` is a definitive provider verdict: `valid: true`
+ * means the key is recognized, `valid: false` means the provider evaluated
+ * the key and considers it invalid. `ok: false` (ProviderFailure) means no
+ * verdict could be obtained — transport failures, HTTP 5xx/4xx, FAIL
+ * envelopes (including errorCode 4010 "auth info not found"), or malformed
+ * responses. Callers must not translate `ok: false` into `valid: false`.
+ *
+ * Stub-mode output is synthetic (`stub: true`) and never provider evidence.
+ */
+export type AnonKeyVerifyResponse =
+  | {
+      ok: true;
+      valid: boolean;
+      /** Synthetic stub-mode output; never present in forward mode. */
+      stub?: true;
+    }
+  | ProviderFailure;
+
 export interface SmartMessageSendInput {
   tossUserKey?: string;
   userKey?: string;
@@ -329,6 +361,9 @@ export interface AppsInTossApi {
   iap: {
     orderStatus(body: IapOrderStatusInput): Promise<IapOrderStatusResponse>;
   };
+  users: {
+    verifyAnonKey(body: AnonKeyVerifyInput): Promise<AnonKeyVerifyResponse>;
+  };
   promotion: {
     rewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
   };
@@ -345,6 +380,7 @@ export interface AppsInTossApiRpc {
   tossLoginComplete(body: TossLoginCompleteInput): Promise<TossLoginCompleteResponse>;
   tossLoginRemoveByUserKey(body: TossLoginRemoveByUserKeyInput): Promise<TossLoginRemoveByUserKeyResponse>;
   iapOrderStatus(body: IapOrderStatusInput): Promise<IapOrderStatusResponse>;
+  verifyAnonKey(body: AnonKeyVerifyInput): Promise<AnonKeyVerifyResponse>;
   promotionRewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
   smartMessageSend(body: SmartMessageSendInput): Promise<SmartMessageResponse>;
   smartMessageBulkSend(body: SmartMessageBulkSendInput): Promise<SmartMessageResponse>;

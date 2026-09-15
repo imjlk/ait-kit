@@ -888,4 +888,136 @@ describe("@ait-kit/api-core", () => {
       "https://partner.example/anything"
     ]);
   });
+
+  function forwardApi(handler: MtlsClient["request"], options: Record<string, unknown> = {}) {
+    const mtlsClient: MtlsClient = { request: handler };
+    return createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient,
+        ...options
+      })
+    );
+  }
+
+  test("verifies a valid anonymous key with the x-anon-key header", async () => {
+    const calls: Array<{ headers: Headers; init: RequestInit }> = [];
+    const api = forwardApi(async (_url, init) => {
+      calls.push({ headers: new Headers(init.headers), init });
+      return Response.json({ resultType: "SUCCESS", success: true });
+    });
+
+    const response = await api.verifyAnonKey({ anonKey: "anon:stored-hash-value" });
+
+    expect(response).toEqual({ ok: true, valid: true });
+    expect(calls[0].headers.get("x-anon-key")).toBe("anon:stored-hash-value");
+    expect(calls[0].init.body).toBeUndefined();
+  });
+
+  test("returns a definitive invalid verdict for rejected anonymous keys", async () => {
+    const api = forwardApi(async () =>
+      Response.json({ resultType: "SUCCESS", success: false })
+    );
+
+    const response = await api.verifyAnonKey({ anonKey: "revoked-hash" });
+
+    expect(response).toEqual({ ok: true, valid: false });
+  });
+
+  test("distinguishes a missing auth context from an invalid key", async () => {
+    const api = forwardApi(async () =>
+      Response.json({
+        resultType: "FAIL",
+        error: { errorCode: "4010", reason: "인증 정보를 찾을 수 없어요." }
+      })
+    );
+
+    const response = await api.verifyAnonKey({ anonKey: "unknown-hash" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "ERROR",
+      providerErrorCode: "4010"
+    });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test("reports verification service failures without an invalid verdict", async () => {
+    const api = forwardApi(async () =>
+      Response.json({ message: "verify service unavailable" }, { status: 503 })
+    );
+
+    const response = await api.verifyAnonKey({ anonKey: "any-hash" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "ERROR",
+      upstreamStatus: 503
+    });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test("treats a 200 timeout envelope as unverifiable", async () => {
+    const api = forwardApi(async () =>
+      Response.json({
+        resultType: "HTTP_TIMEOUT",
+        error: { errorCode: "5000", reason: "upstream timeout" }
+      })
+    );
+
+    const response = await api.verifyAnonKey({ anonKey: "any-hash" });
+
+    expect(response).toMatchObject({ ok: false, providerErrorCode: "5000" });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test("treats a malformed verdict as unverifiable", async () => {
+    const api = forwardApi(async () =>
+      Response.json({ resultType: "SUCCESS", success: "yes" })
+    );
+
+    const response = await api.verifyAnonKey({ anonKey: "any-hash" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "INVALID_RESPONSE",
+      providerStatus: "ERROR"
+    });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test.each(["forward", "stub"] as const)("requires an anonymous key in %s mode", async (mode) => {
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode,
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient: {
+          async request() {
+            throw new Error("missing keys must not reach the transport");
+          }
+        }
+      })
+    );
+
+    await expect(api.verifyAnonKey({})).resolves.toMatchObject({
+      ok: false,
+      error: "MISSING_ANON_KEY",
+      providerStatus: "ERROR"
+    });
+    await expect(api.verifyAnonKey({ anonKey: "   " })).resolves.toMatchObject({
+      ok: false,
+      error: "MISSING_ANON_KEY"
+    });
+  });
+
+  test("marks stub verification output as synthetic", async () => {
+    const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub" }));
+
+    await expect(api.verifyAnonKey({ anonKey: "anon-hash" })).resolves.toEqual({
+      ok: true,
+      valid: true,
+      stub: true
+    });
+  });
 });

@@ -96,6 +96,7 @@ describe("@ait-kit/api-client", () => {
     await client.tossLoginComplete({});
     await client.tossLoginRemoveByUserKey({});
     await client.iapOrderStatus({});
+    await client.anonKeyVerify({ anonKey: "anon-hash" });
     await client.promotionRewardGrant({});
     await client.smartMessageBulkSend({ templateSetCode: "template", contextList: [] });
 
@@ -104,6 +105,7 @@ describe("@ait-kit/api-client", () => {
       PROXY_ENDPOINTS.tossLoginComplete,
       PROXY_ENDPOINTS.tossLoginRemoveByUserKey,
       PROXY_ENDPOINTS.iapOrderStatus,
+      PROXY_ENDPOINTS.anonKeyVerify,
       PROXY_ENDPOINTS.promotionRewardGrant,
       PROXY_ENDPOINTS.smartMessageBulkSend
     ]);

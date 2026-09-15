@@ -1,4 +1,6 @@
 export type {
+  AnonKeyVerifyInput,
+  AnonKeyVerifyResponse,
   AppsInTossApiRpc,
   HealthResponse,
   IapOrderStatusInput,
@@ -7,6 +9,7 @@ export type {
   IapOrderVerifiedResponse,
   IapSkuCheckStatus,
   IapVerificationCode,
+  MessageRecipient,
   MtlsClient,
   MtlsClientFactory,
   PromotionRewardGrantInput,
@@ -24,6 +27,8 @@ export type {
   TossMtlsCoreOptions
 } from "@ait-kit/api-core";
 import type {
+  AnonKeyVerifyInput,
+  AnonKeyVerifyResponse,
   HealthResponse,
   IapOrderStatusInput,
   IapOrderStatusResponse,
@@ -47,6 +52,7 @@ export const PROXY_ENDPOINTS = Object.freeze({
   tossLoginComplete: "/internal/apps-in-toss/toss-login/complete",
   tossLoginRemoveByUserKey: "/internal/apps-in-toss/toss-login/remove-by-user-key",
   iapOrderStatus: "/internal/apps-in-toss/iap/order/status",
+  anonKeyVerify: "/internal/apps-in-toss/users/anon-key/verify",
   promotionRewardGrant: "/internal/apps-in-toss/promotion/reward/grant",
   smartMessageSend: "/internal/apps-in-toss/smart-message/send",
   smartMessageBulkSend: "/internal/apps-in-toss/smart-message/send-bulk"
@@ -67,6 +73,7 @@ export interface TossMtlsHttpClient {
   tossLoginComplete(body: TossLoginCompleteInput): Promise<TossLoginCompleteResponse>;
   tossLoginRemoveByUserKey(body: TossLoginRemoveByUserKeyInput): Promise<TossLoginRemoveByUserKeyResponse>;
   iapOrderStatus(body: IapOrderStatusInput): Promise<IapOrderStatusResponse>;
+  anonKeyVerify(body: AnonKeyVerifyInput): Promise<AnonKeyVerifyResponse>;
   promotionRewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
   smartMessageSend(body: SmartMessageSendInput): Promise<SmartMessageResponse>;
   smartMessageBulkSend(body: SmartMessageBulkSendInput): Promise<SmartMessageResponse>;
@@ -155,6 +162,7 @@ export function createTossMtlsHttpClient(options: TossMtlsHttpClientOptions): To
     tossLoginComplete: (body) => request("POST", PROXY_ENDPOINTS.tossLoginComplete, body),
     tossLoginRemoveByUserKey: (body) => request("POST", PROXY_ENDPOINTS.tossLoginRemoveByUserKey, body),
     iapOrderStatus: (body) => request("POST", PROXY_ENDPOINTS.iapOrderStatus, body),
+    anonKeyVerify: (body) => request("POST", PROXY_ENDPOINTS.anonKeyVerify, body),
     promotionRewardGrant: (body) => request("POST", PROXY_ENDPOINTS.promotionRewardGrant, body),
     smartMessageSend: (body) => request("POST", PROXY_ENDPOINTS.smartMessageSend, body),
     smartMessageBulkSend: (body) => request("POST", PROXY_ENDPOINTS.smartMessageBulkSend, body)
