@@ -547,10 +547,6 @@ function runTsc(cwd, file, moduleResolution, lib) {
     "tsc",
     "--noEmit",
     "--strict",
-    // Official SDK type trees (react-native et al.) are not strict-clean
-    // internally; React Native projects standardly enable skipLibCheck.
-    // The consumer files themselves are still fully checked.
-    "--skipLibCheck",
     "--target",
     "es2022",
     "--module",
@@ -559,9 +555,13 @@ function runTsc(cwd, file, moduleResolution, lib) {
     moduleResolution
   ];
   if (lib) {
-    // The official RN types collide with lib.dom's globals (URL etc.);
-    // React Native environments carry their own globals, not the DOM.
-    args.push("--lib", lib);
+    // Official SDK type trees (react-native et al.) are not strict-clean
+    // internally and their RN globals collide with lib.dom; React Native
+    // projects standardly enable skipLibCheck and drop the DOM lib. The
+    // consumer files themselves are still fully checked. Fixture calls
+    // WITHOUT a lib (the stub-SDK checks) keep checking the shipped
+    // declarations in full.
+    args.push("--skipLibCheck", "--lib", lib);
   }
   args.push(file);
   run("npm", args, cwd);
@@ -692,35 +692,60 @@ import {
 // the REAL official function ran (as opposed to an adapter stub).
 const BRIDGE_ERROR = "native bridge unavailable in the tarball fixture";
 
+// The fixture's own failure sentinel: must always escape the catch blocks
+// below instead of being mistaken for an official-SDK rejection.
+class FixtureFailure extends Error {}
+
 function failIfAdapterError(error: unknown, label: string): void {
+  if (error instanceof FixtureFailure) throw error;
   if (error instanceof SdkError) {
     throw new Error(\`\${label}: adapter produced \${error.code} (\${error.message}) instead of reaching the official SDK function\`);
   }
 }
 
+// For paths whose rejection is deterministic (the bridge stub rejects
+// every awaited bridge call with the marker).
+function expectBridgeRejection(error: unknown, label: string): void {
+  failIfAdapterError(error, label);
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.includes(BRIDGE_ERROR)) {
+    throw new Error(\`\${label}: rejection did not come from the stubbed bridge: \${message}\`);
+  }
+}
+
 // 1. Identity: the real appLogin/getAnonymousKey run and their bridge
-// rejections propagate — NOT a namespace-mismatch UNSUPPORTED.
+// rejections propagate with the marker — NOT a namespace-mismatch
+// UNSUPPORTED.
 const identity = createReactNativeIdentity();
 try {
   await identity.login();
-  throw new Error("login: expected the stubbed bridge to reject");
+  throw new FixtureFailure("login: expected the stubbed bridge to reject");
 } catch (error) {
-  failIfAdapterError(error, "login");
+  expectBridgeRejection(error, "login");
 }
 try {
   await identity.getAnonymousKey();
-  throw new Error("getAnonymousKey: expected the stubbed bridge to reject or sentinel");
+  throw new FixtureFailure("getAnonymousKey: expected the stubbed bridge to reject or resolve the ERROR sentinel");
 } catch (error) {
-  failIfAdapterError(error, "getAnonymousKey");
+  if (error instanceof FixtureFailure) throw error;
+  // With the stubbed bridge the real function deterministically resolves
+  // its documented "ERROR" sentinel (rejected by the shared validator as
+  // INVALID_ANONYMOUS_KEY) or rejects with the bridge marker — both prove
+  // the official function ran; the regression would be UNSUPPORTED.
+  const isSentinel = error instanceof SdkError && error.code === "INVALID_ANONYMOUS_KEY";
+  const isBridge = error instanceof Error && error.message.includes(BRIDGE_ERROR);
+  if (!isSentinel && !isBridge) {
+    throw new Error(\`getAnonymousKey: rejection did not come from the official function: \${String(error)}\`);
+  }
 }
 
 // 2. Share link: positional arguments reach the real getTossShareLink.
 const share = createReactNativeShare();
 try {
   await share.createLink("intoss://fixture");
-  throw new Error("createLink: expected the stubbed bridge to reject");
+  throw new FixtureFailure("createLink: expected the stubbed bridge to reject");
 } catch (error) {
-  failIfAdapterError(error, "createLink");
+  expectBridgeRejection(error, "createLink");
 }
 
 // 3. Share sheet: the real share() runs. In this stubbed environment it
@@ -732,23 +757,26 @@ const sheetOk =
   sheetResult.status === "completed" ||
   (sheetResult.status === "failed" && sheetResult.reason?.includes(BRIDGE_ERROR));
 if (!sheetOk) {
-  throw new Error(\`sendMessage: unexpected result \${JSON.stringify(sheetResult)}\`);
+  throw new FixtureFailure(\`sendMessage: unexpected result \${JSON.stringify(sheetResult)}\`);
 }
 
-// 4. Notification: the real requestNotificationAgreement runs. Without a
-// real app version the SDK's own version gate throws during registration
-// (propagated by the event flow), and with registration succeeding the
-// request settles by its deadline — both prove the real function was
-// reached; the regression would be an adapter UNSUPPORTED.
+// 4. Notification: the real requestNotificationAgreement registers and
+// the real SDK surfaces the stubbed bridge failure through onError,
+// settling as failed with the marker (or, without the bridge error, by
+// the request deadline) — never an adapter UNSUPPORTED.
 const notification = createReactNativeNotification({ timeoutMs: 250 });
 await notification.requestAgreement("TEMPLATE_1").then(
   (result) => {
-    if (result.status !== "timeout") {
-      throw new Error(\`requestAgreement: unexpected result \${JSON.stringify(result)}\`);
+    const settled =
+      (result.status === "failed" && result.reason?.includes(BRIDGE_ERROR)) ||
+      result.status === "timeout";
+    if (!settled) {
+      throw new FixtureFailure(\`requestAgreement: unexpected result \${JSON.stringify(result)}\`);
     }
   },
   (error) => {
     failIfAdapterError(error, "requestAgreement");
+    throw new FixtureFailure("requestAgreement: expected the request to settle");
   }
 );
 
@@ -757,9 +785,9 @@ await notification.requestAgreement("TEMPLATE_1").then(
 const storage = createReactNativeStorage();
 try {
   await storage.get("fixture-key");
-  throw new Error("storage.get: expected the stubbed bridge to reject");
+  throw new FixtureFailure("storage.get: expected the stubbed bridge to reject");
 } catch (error) {
-  failIfAdapterError(error, "storage.get");
+  expectBridgeRejection(error, "storage.get");
 }
 `;
 
@@ -773,39 +801,71 @@ import {
 
 // Outside the Toss webview every official web SDK call throws the
 // environment assertion — proving the real module loaded and the shared
-// namespaced contract matched it.
+// namespaced contract matched it. Defining window with the SDK's
+// constants globals (modern app version so the SDK's own version gates
+// pass) but WITHOUT the React Native WebView bridge routes every call
+// through that assertion deterministically, instead of raw
+// "window is not defined" ReferenceErrors.
+(globalThis as { window?: unknown }).window = {
+  ReactNativeWebView: null,
+  __appsInTossConstants: {
+    tossAppVersion: "9.9.9",
+    operationalEnvironment: "toss",
+    platformOS: "android"
+  }
+};
 const WEBVIEW_ERROR = "apps-in-toss 웹뷰 환경이 아니에요";
 
-function failIfAdapterError(error: unknown, label: string): void {
+// The fixture's own failure sentinel: must always escape the catch blocks
+// below instead of being mistaken for an official-SDK rejection.
+class FixtureFailure extends Error {}
+
+function expectWebviewRejection(error: unknown, label: string): void {
+  if (error instanceof FixtureFailure) throw error;
   if (error instanceof SdkError) {
     throw new Error(\`\${label}: adapter produced \${error.code} (\${error.message}) instead of reaching the official SDK\`);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.includes(WEBVIEW_ERROR)) {
+    throw new Error(\`\${label}: rejection did not come from the official webview assertion: \${message}\`);
   }
 }
 
 const identity = createWebIdentity();
 try {
   await identity.login();
-  throw new Error("login: expected the webview assertion");
+  throw new FixtureFailure("login: expected the webview assertion");
 } catch (error) {
-  failIfAdapterError(error, "login");
+  expectWebviewRejection(error, "login");
 }
 try {
   await identity.getAnonymousKey();
-  throw new Error("getAnonymousKey: expected the webview assertion");
+  throw new FixtureFailure("getAnonymousKey: expected the webview assertion");
 } catch (error) {
-  failIfAdapterError(error, "getAnonymousKey");
+  // The official web SDK maps environment failures in the anonymous-key
+  // path to its own documented unknown-error message instead of the raw
+  // webview assertion (the "ERROR" sentinel equivalent) — both prove the
+  // real function ran.
+  if (error instanceof FixtureFailure) throw error;
+  if (error instanceof SdkError) {
+    throw new Error(\`getAnonymousKey: adapter produced \${error.code} (\${error.message}) instead of reaching the official SDK\`);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.includes(WEBVIEW_ERROR) && !message.includes("사용자 키 조회")) {
+    throw new Error(\`getAnonymousKey: rejection did not come from the official SDK: \${message}\`);
+  }
 }
 
 const share = createWebShare();
 try {
   await share.createLink("intoss://fixture");
-  throw new Error("createLink: expected the webview assertion");
+  throw new FixtureFailure("createLink: expected the webview assertion");
 } catch (error) {
-  failIfAdapterError(error, "createLink");
+  expectWebviewRejection(error, "createLink");
 }
 const sheetResult = await share.sendMessage("fixture message");
 if (sheetResult.status !== "failed" || !sheetResult.reason?.includes(WEBVIEW_ERROR)) {
-  throw new Error(\`sendMessage: unexpected result \${JSON.stringify(sheetResult)}\`);
+  throw new FixtureFailure(\`sendMessage: unexpected result \${JSON.stringify(sheetResult)}\`);
 }
 
 // The official Notification.requestAgreement asserts the webview during
@@ -814,17 +874,17 @@ if (sheetResult.status !== "failed" || !sheetResult.reason?.includes(WEBVIEW_ERR
 const notification = createWebNotification({ timeoutMs: 250 });
 try {
   await notification.requestAgreement("TEMPLATE_1");
-  throw new Error("requestAgreement: expected the webview assertion");
+  throw new FixtureFailure("requestAgreement: expected the webview assertion");
 } catch (error) {
-  failIfAdapterError(error, "requestAgreement");
+  expectWebviewRejection(error, "requestAgreement");
 }
 
 const storage = createWebStorage();
 try {
   await storage.get("fixture-key");
-  throw new Error("storage.get: expected the webview assertion");
+  throw new FixtureFailure("storage.get: expected the webview assertion");
 } catch (error) {
-  failIfAdapterError(error, "storage.get");
+  expectWebviewRejection(error, "storage.get");
 }
 `;
 
@@ -873,6 +933,11 @@ const bridgeUnavailable = () => {
 const nativeModule = new Proxy({}, {
   get(_target, prop) {
     if (prop === "addListener" || prop === "removeListeners") return () => {};
+    // Sync constants call: a modern app version so the SDK's own version
+    // gates pass and every flow reaches the (rejecting) async bridge.
+    if (prop === "getConstants") {
+      return () => ({ tossAppVersion: "9.9.9" });
+    }
     return (..._args) => bridgeUnavailable();
   }
 });

@@ -136,8 +136,13 @@ Contracts:
   reject with `SdkError("INVALID_LOGIN_RESULT")`; unsupported environments
   with `UNSUPPORTED`; SDK rejections propagate unchanged.
 - **Anonymous key** results must be the documented `{ type: "HASH", hash }`
-  shape. Anything else (including sentinel values) rejects with
-  `SdkError("INVALID_ANONYMOUS_KEY")` — the adapter never invents a key.
+  shape. Anything else (including the official SDK's `"ERROR"` sentinel)
+  rejects with `SdkError("INVALID_ANONYMOUS_KEY")` — the adapter never
+  invents a key. One exception: on React Native the official
+  `getAnonymousKey()` resolves `undefined` when the installed app is below
+  the feature's minimum version, which rejects with
+  `SdkError("UNSUPPORTED")` instead — an unsupported environment, not a
+  malformed key.
 - **Storage** keys and string values pass through byte-for-byte: no
   namespace prefixing, no key transformation. Compose namespaced keys
   yourself (e.g. `cart:items`). `get` resolves `null` for missing keys;
@@ -273,3 +278,9 @@ a correctly installed official RN SDK still produced
 `SdkError("UNSUPPORTED")` for these five capabilities because the loaders
 looked for the web SDK's namespaced shapes. Custom `framework` injections
 using the internal namespaced contract or a loader keep working unchanged.
+
+One error-mapping change rides along: the official RN `getAnonymousKey()`
+resolving `undefined` (installed app below the feature's minimum version)
+now rejects with `SdkError("UNSUPPORTED")` instead of
+`INVALID_ANONYMOUS_KEY`; the `"ERROR"` sentinel still rejects with
+`INVALID_ANONYMOUS_KEY`.
