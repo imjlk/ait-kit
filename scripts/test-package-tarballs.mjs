@@ -200,11 +200,16 @@ try {
           subpath: "rn",
           platformPackage: "@apps-in-toss/framework",
           externalFlag: "--external:@apps-in-toss/framework",
-          consumerImports: `import { createReactNativeAds, createReactNativeIap } from ${JSON.stringify(
-            `${packedPackage.name}/rn`
-          )};`,
+          consumerImports: `import {
+  createReactNativeAds,
+  createReactNativeIdentity,
+  createReactNativeIap,
+  createReactNativeStorage
+} from ${JSON.stringify(`${packedPackage.name}/rn`)};`,
           consumerBody: `export const ads = createReactNativeAds();
 export const iap = createReactNativeIap({ grant: async () => {} });
+export const identity = createReactNativeIdentity();
+export const storage = createReactNativeStorage();
 export async function crossEntryInstanceofCheck(): Promise<boolean> {
   try {
     await iap.getPendingOrders();
@@ -224,10 +229,14 @@ if (!(await crossEntryInstanceofCheck())) {
           subpath: "web",
           platformPackage: "@apps-in-toss/web-framework",
           externalFlag: "--external:@apps-in-toss/web-framework",
-          consumerImports: `import { createWebIap } from ${JSON.stringify(
-            `${packedPackage.name}/web`
-          )};`,
+          consumerImports: `import {
+  createWebIap,
+  createWebIdentity,
+  createWebStorage
+} from ${JSON.stringify(`${packedPackage.name}/web`)};`,
           consumerBody: `export const iap = createWebIap({ grant: async () => {} });
+export const identity = createWebIdentity();
+export const storage = createWebStorage();
 export async function crossEntryInstanceofCheck(): Promise<boolean> {
   try {
     await iap.getPendingOrders();

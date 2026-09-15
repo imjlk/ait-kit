@@ -28,6 +28,15 @@ export {
   type ReactNativeIapOptions
 } from "./iap.js";
 export type { IapRecoveryResult } from "./iap.js";
+export {
+  createReactNativeIdentity,
+  type ReactNativeIdentity,
+  type ReactNativeIdentityOptions
+} from "./identity.js";
+export {
+  createReactNativeStorage,
+  type ReactNativeStorageOptions
+} from "./storage.js";
 export { createDefaultFrameworkLoader, type FrameworkLoader } from "./framework-loader.js";
 export type {
   FullScreenAdShowEvent,

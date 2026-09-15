@@ -32,7 +32,46 @@ export type SdkErrorCode =
   | "AD_NOT_LOADED" // show requested before a completed load
   | "AD_ALREADY_SHOWING" // this ad is currently being shown
   | "AD_LOAD_FAILED" // the provider rejected the load (transient; retryable)
-  | "AD_LOAD_TIMEOUT"; // the load flow exceeded its deadline (retryable)
+  | "AD_LOAD_TIMEOUT" // the load flow exceeded its deadline (retryable)
+  | "INVALID_LOGIN_RESULT" // the SDK resolved a login result that failed validation
+  | "INVALID_ANONYMOUS_KEY"; // the SDK resolved an anonymous key that failed validation
+
+// --------------------------------------------------------------------------
+// Login / anonymous identity / storage contracts (adapters live in /rn, /web)
+// --------------------------------------------------------------------------
+
+export type SdkLoginReferrer = "DEFAULT" | "SANDBOX";
+
+/**
+ * Validated login result. Both values come from the platform SDK and pass
+ * through unchanged: exchange `authorizationCode` for tokens on YOUR server
+ * (see @ait-kit/api-core's login token endpoint) and create the application
+ * session there — the SDK adapter never performs the exchange.
+ */
+export interface SdkLoginResult {
+  authorizationCode: string;
+  referrer: SdkLoginReferrer;
+}
+
+/**
+ * Validated anonymous identity: the SDK-issued per-mini-app hash. The
+ * adapter never fabricates a key when the SDK cannot provide one — a
+ * missing or malformed result is an error, not a placeholder.
+ */
+export interface SdkAnonymousKey {
+  type: "HASH";
+  hash: string;
+}
+
+/** Minimal storage contract shared by the /rn and /web adapters. */
+export interface SdkStorage {
+  /** Resolves the stored string, or null when the key has no value. */
+  get(key: string): Promise<string | null>;
+  /** Persists a string; rejections propagate to the caller. */
+  set(key: string, value: string): Promise<void>;
+  /** Removes the value for a key; rejections propagate to the caller. */
+  remove(key: string): Promise<void>;
+}
 
 // ---------------------------------------------------------------------------
 // In-app purchase contracts (runtime-neutral; adapters live in /rn and /web)

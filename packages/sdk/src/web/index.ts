@@ -44,6 +44,14 @@ export interface WebIapOptions extends Omit<IapAdapterOptions, "loader"> {
 export type WebIap = ReturnType<typeof createWebIap>;
 export type { IapRecoveryResult };
 
+export {
+  createWebIdentity,
+  type WebIdentity,
+  type WebIdentityOptions
+} from "./identity.js";
+export { createWebStorage, type WebStorageOptions } from "./identity.js";
+// createWebStorage lives in identity.ts alongside the shared web loader helpers.
+
 export function createWebIap(options: WebIapOptions) {
   const loader: IapPlatformLoader = !options.framework
     ? createDefaultWebFrameworkLoader()
