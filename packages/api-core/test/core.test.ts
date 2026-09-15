@@ -987,6 +987,56 @@ describe("@ait-kit/api-core", () => {
     expect(response).not.toHaveProperty("valid");
   });
 
+  test("rejects a bare boolean without a SUCCESS envelope", async () => {
+    const api = forwardApi(async () => Response.json({ success: false }));
+
+    const response = await api.verifyAnonKey({ anonKey: "any-hash" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "INVALID_RESPONSE",
+      failureReason: "verify response was not a SUCCESS envelope"
+    });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test("converts transport rejections into no-verdict failures", async () => {
+    const api = forwardApi(async () => {
+      throw new Error("connection reset");
+    });
+
+    const response = await api.verifyAnonKey({ anonKey: "any-hash" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "UPSTREAM_UNAVAILABLE",
+      providerStatus: "ERROR",
+      failureReason: "anonymous key verification request failed: connection reset"
+    });
+    expect(response).not.toHaveProperty("valid");
+  });
+
+  test.each([
+    ["a malformed anon key next to a valid user key", { userKey: "u", anonKey: 42 }],
+    ["an empty toss user key next to a valid user key", { userKey: "u", tossUserKey: "" }],
+    ["a malformed user key next to a valid anon key", { userKey: true, anonKey: "a" }]
+  ] as const)(
+    "rejects %s instead of discarding the malformed identifier",
+    async (_label, recipient) => {
+      const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "forward" }));
+
+      const input = {
+        ...recipient,
+        templateSetCode: "template",
+        context: {}
+      } as unknown as SmartMessageSendInput;
+      await expect(api.smartMessageSend(input)).rejects.toMatchObject({
+        code: "INVALID_MESSAGE_RECIPIENT",
+        status: 400
+      });
+    }
+  );
+
   test.each(["forward", "stub"] as const)("requires an anonymous key in %s mode", async (mode) => {
     const api = createAppsInTossApiRpc(
       createAppsInTossApi({

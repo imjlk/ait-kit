@@ -33,17 +33,16 @@ export function normalizeMessageRecipient(
   const tossUserKey = recipientUserValue(object.tossUserKey);
   const anonKey = recipientAnonValue(object.anonKey);
 
+  // Count fields that were supplied at all — not just ones that parsed — so a
+  // malformed extra identifier next to a valid one is still rejected instead
+  // of being silently discarded.
   const supplied = [
-    userKey !== undefined,
-    tossUserKey !== undefined,
-    anonKey !== undefined
+    isPresent(object.userKey),
+    isPresent(object.tossUserKey),
+    isPresent(object.anonKey)
   ].filter(Boolean).length;
 
   if (supplied === 0) {
-    const invalidField = firstInvalidRecipientField(object);
-    if (invalidField) {
-      throw clientError(errorCode, `${errorContext}: ${invalidField.message}`, 400);
-    }
     throw clientError(
       errorCode,
       `${errorContext} must include exactly one of userKey, tossUserKey, or anonKey`,
@@ -59,10 +58,27 @@ export function normalizeMessageRecipient(
     );
   }
 
-  if (anonKey !== undefined) {
+  if (isPresent(object.anonKey)) {
+    if (anonKey === undefined) {
+      throw invalidRecipientValue(errorCode, errorContext, "anonKey must be a non-empty string");
+    }
     return { kind: "anonymous", anonKey };
   }
-  return { kind: "user", userKey: (userKey ?? tossUserKey) as string | number };
+
+  const userValue = userKey ?? tossUserKey;
+  if (userValue === undefined) {
+    const field = isPresent(object.userKey) ? "userKey" : "tossUserKey";
+    throw invalidRecipientValue(
+      errorCode,
+      errorContext,
+      `${field} must be a non-empty string or finite number`
+    );
+  }
+  return { kind: "user", userKey: userValue };
+}
+
+function invalidRecipientValue(errorCode: string, errorContext: string, message: string) {
+  return clientError(errorCode, `${errorContext}: ${message}`, 400);
 }
 
 function recipientUserValue(value: unknown): string | number | undefined {
@@ -77,20 +93,6 @@ function recipientUserValue(value: unknown): string | number | undefined {
 
 function recipientAnonValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function firstInvalidRecipientField(object: Record<string, unknown>) {
-  for (const field of ["userKey", "tossUserKey"] as const) {
-    if (isPresent(object[field])) {
-      return {
-        message: `${field} must be a non-empty string or finite number`
-      };
-    }
-  }
-  if (isPresent(object.anonKey)) {
-    return { message: "anonKey must be a non-empty string" };
-  }
-  return undefined;
 }
 
 function isPresent(value: unknown) {

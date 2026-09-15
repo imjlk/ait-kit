@@ -37,14 +37,28 @@ export async function verifyAnonKey(
   if (options.mode !== "forward") {
     return { ok: true, valid: true, stub: true };
   }
-  const upstream = await requestToss(
-    {
-      method: "POST",
-      path: TOSS_ENDPOINTS.anonKeyVerify,
-      headers: { "x-anon-key": anonKey }
-    },
-    options
-  );
+  let upstream;
+  try {
+    upstream = await requestToss(
+      {
+        method: "POST",
+        path: TOSS_ENDPOINTS.anonKeyVerify,
+        headers: { "x-anon-key": anonKey }
+      },
+      options
+    );
+  } catch (error) {
+    // Transport rejections (timeout, TLS, network) carry no verdict either
+    // way; surface them as a no-verdict failure instead of throwing, so the
+    // HTTP fallback and api-client keep the invalid/unavailable distinction.
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      providerStatus: "ERROR",
+      error: "UPSTREAM_UNAVAILABLE",
+      failureReason: `anonymous key verification request failed: ${message}`
+    };
+  }
   return normalizeAnonKeyVerifyResponse(upstream.body, upstream.status);
 }
 
@@ -72,6 +86,16 @@ export function normalizeAnonKeyVerifyResponse(
       providerStatus: "ERROR",
       failureReason: upstreamFailureReason(upstream),
       providerErrorCode: upstreamFailureCode(upstream),
+      upstreamStatus
+    };
+  }
+  if (resultType !== "SUCCESS") {
+    // Only a boolean inside an explicit SUCCESS envelope is a verdict.
+    return {
+      ok: false,
+      providerStatus: "ERROR",
+      error: "INVALID_RESPONSE",
+      failureReason: "verify response was not a SUCCESS envelope",
       upstreamStatus
     };
   }
