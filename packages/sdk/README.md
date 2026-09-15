@@ -98,9 +98,11 @@ SDK initialization never grants or completes pending orders by itself.
 | Pending orders | ✅ | ✅ | recovery is consumer-driven |
 | Grant completion notify | ✅ | ✅ | sent only after server grant confirms |
 | Full-screen ads | ✅ | ➖ | ads are RN-only today |
+| Notification agreement | ✅ | ✅ | event-based, one template per request |
+| Share link / share sheet | ✅ | ✅ | `intoss://` paths; `closed` ≠ shared |
 | Unsupported app version | `SdkError("UNSUPPORTED")` | same | per-function `isSupported` gates |
 
-Notification and sharing arrive in a later entry.
+Notification and sharing adapters ship in both entries (see below).
 
 ## Login, anonymous identity, and storage (RN + Web)
 
@@ -145,6 +147,48 @@ Contracts:
   replacement via the `framework` option.
 - Session invalidation when the anonymous identifier changes, migration of
   previously stored keys, and bootstrap sequencing stay with the consumer.
+
+## Notification agreement and sharing (RN + Web)
+
+```ts
+import {
+  createReactNativeNotification,
+  createReactNativeShare
+} from "@ait-kit/sdk/rn";
+// or: import { createWebNotification, createWebShare } from "@ait-kit/sdk/web";
+
+// 1. Notification agreement: one template, one request.
+const notification = createReactNativeNotification();
+const result = await notification.requestAgreement("TEMPLATE_CODE");
+// result.status: "agreed" (newAgreement | alreadyAgreed) | "rejected"
+//              | "failed" | "timeout"
+// result.templateCode and result.sourceEvent are preserved verbatim. The
+// outcome describes ONLY this request — it is not the user's global
+// notification setting, nor any server-persisted consent state. Syncing
+// consent to your server (and any smart-message sending) is your job.
+
+// 2. Share links: intoss:// deeplink paths, optional OG image.
+const share = createReactNativeShare();
+const link = await share.createLink("intoss://my-app/about", "https://cdn/og.png");
+
+// 3. Share sheet: "closed" means the sheet flow ended — nothing more.
+const uiResult = await share.sendMessage(`check this out ${link}`);
+// uiResult.status: "closed" | "failed" — closed does NOT prove the user
+// shared and never grants share-reward eligibility.
+```
+
+Contracts:
+
+- **Agreement** runs on the shared event-flow base: settle-once, duplicate/
+  late-event immunity, single error-swallowing cleanup, registration-throw
+  recovery, one overall deadline (`timeoutMs`, default 60s). SDK errors keep
+  their `code`/`reason`; timeouts report `timeout` with the template.
+- **Share links** validate the documented `intoss://` path contract
+  (`INVALID_SHARE_PATH` otherwise) and pass the resolved link through
+  verbatim. OG image generation is the consumer's concern.
+- **Share sheet** resolution is `closed`, not "completed" — reward grants
+  and completion tracking stay with the consumer.
+- Unsupported surfaces/app versions reject with `SdkError("UNSUPPORTED")`.
 
 ## React Native full-screen ads
 

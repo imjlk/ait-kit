@@ -34,7 +34,42 @@ export type SdkErrorCode =
   | "AD_LOAD_FAILED" // the provider rejected the load (transient; retryable)
   | "AD_LOAD_TIMEOUT" // the load flow exceeded its deadline (retryable)
   | "INVALID_LOGIN_RESULT" // the SDK resolved a login result that failed validation
-  | "INVALID_ANONYMOUS_KEY"; // the SDK resolved an anonymous key that failed validation
+  | "INVALID_ANONYMOUS_KEY" // the SDK resolved an anonymous key that failed validation
+  | "INVALID_SHARE_PATH"; // a share link path was not an intoss:// deeplink
+
+// ---------------------------------------------------------------------------
+// Notification agreement / sharing contracts (adapters live in /rn, /web)
+// ---------------------------------------------------------------------------
+
+/** Terminal agreement outcomes delivered by the platform event. */
+export type SdkNotificationAgreementType = "newAgreement" | "alreadyAgreed" | "agreementRejected";
+
+/**
+ * Result of one notification agreement request. `templateCode` and the
+ * platform's raw event are preserved verbatim, and the outcome describes
+ * ONLY this single request — it is not the user's global notification
+ * setting, nor any server-persisted consent state (syncing those is the
+ * consumer's job).
+ */
+export type SdkNotificationAgreementResult =
+  | {
+      status: "agreed";
+      agreement: Exclude<SdkNotificationAgreementType, "agreementRejected">;
+      templateCode: string;
+      sourceEvent: { type: string };
+    }
+  | { status: "rejected"; templateCode: string; sourceEvent: { type: string } }
+  | { status: "failed"; templateCode: string; code?: string; reason?: string }
+  | { status: "timeout"; templateCode: string; reason?: string };
+
+/**
+ * Result of opening the share UI. `closed` means the native share sheet
+ * flow ended normally — it does NOT prove the user actually shared, and it
+ * never grants share-reward eligibility on its own.
+ */
+export type SdkShareUiResult =
+  | { status: "closed" }
+  | { status: "failed"; code?: string; reason?: string };
 
 // --------------------------------------------------------------------------
 // Login / anonymous identity / storage contracts (adapters live in /rn, /web)

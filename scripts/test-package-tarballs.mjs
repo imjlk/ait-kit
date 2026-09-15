@@ -204,12 +204,16 @@ try {
   createReactNativeAds,
   createReactNativeIdentity,
   createReactNativeIap,
+  createReactNativeNotification,
+  createReactNativeShare,
   createReactNativeStorage
 } from ${JSON.stringify(`${packedPackage.name}/rn`)};`,
           consumerBody: `export const ads = createReactNativeAds();
 export const iap = createReactNativeIap({ grant: async () => {} });
 export const identity = createReactNativeIdentity();
 export const storage = createReactNativeStorage();
+export const notification = createReactNativeNotification();
+export const share = createReactNativeShare();
 export async function crossEntryInstanceofCheck(): Promise<boolean> {
   try {
     await iap.getPendingOrders();
@@ -232,11 +236,15 @@ if (!(await crossEntryInstanceofCheck())) {
           consumerImports: `import {
   createWebIap,
   createWebIdentity,
+  createWebNotification,
+  createWebShare,
   createWebStorage
 } from ${JSON.stringify(`${packedPackage.name}/web`)};`,
           consumerBody: `export const iap = createWebIap({ grant: async () => {} });
 export const identity = createWebIdentity();
 export const storage = createWebStorage();
+export const notification = createWebNotification();
+export const share = createWebShare();
 export async function crossEntryInstanceofCheck(): Promise<boolean> {
   try {
     await iap.getPendingOrders();
