@@ -1,0 +1,10 @@
+---
+npm/@ait-kit/sdk: minor
+---
+
+Align the React Native adapters with the official SDK exports and tighten what share results mean.
+
+- The RN default loaders now convert the official flat exports — `appLogin`, `getAnonymousKey`, `requestNotificationAgreement`, `getTossShareLink(path, ogImageUrl?)`, `share({ message })` — into the shared adapter contracts (verified against `@apps-in-toss/framework` 2.10.10). Previously a correctly installed official RN SDK still rejected these five capabilities with `SdkError("UNSUPPORTED")` because the loaders only looked for the web SDK's namespaced shapes. Receiver context, optional `isSupported` gates, and the notification cleanup function are preserved through the conversion; partial official modules keep working per operation. Existing `framework` injections (namespaced contract objects and custom loaders) are unchanged.
+- `getAnonymousKey()` resolving `undefined` (app below the feature's minimum version) now reports `UNSUPPORTED` instead of `INVALID_ANONYMOUS_KEY`; the `"ERROR"` sentinel still rejects through the shared validator.
+- **Breaking rename:** `sendMessage` now resolves `{ status: "completed" }` instead of `{ status: "closed" }`. `completed` states only that the SDK share call finished — it does not prove the share sheet opened or closed, that the user shared, or that any reward eligibility was earned. Failure results (`status: "failed"` with `code`/`reason`) are unchanged; see the README migration note.
+- Peer dependency floors now match the verified official versions: `@apps-in-toss/framework >= 2.10.10`, `@apps-in-toss/web-framework >= 3.4.0`. CI fixtures pin those exact versions, type-check consumers against the real official declarations (with canary imports proving the shipped ambient declarations do not mask them), execute the default loaders against the real SDK distributions, and scan the published tarball for cross-platform SDK leakage in both JavaScript and type declarations.

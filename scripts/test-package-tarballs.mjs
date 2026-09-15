@@ -9,12 +9,21 @@ import {
   writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const commandTimeoutMs = positiveTimeout(process.env.AIT_PACKAGE_SMOKE_TIMEOUT_MS, 120_000);
 const installCommandTimeoutMs = positiveTimeout(process.env.AIT_PACKAGE_INSTALL_TIMEOUT_MS, 300_000);
+const RN_PLATFORM_PACKAGE = "@apps-in-toss/framework";
+const WEB_PLATFORM_PACKAGE = "@apps-in-toss/web-framework";
+// Exact official versions the @ait-kit/sdk adapters were developed and
+// verified against. The peerDependency ranges in packages/sdk/package.json
+// must stay aligned with these floors.
+const OFFICIAL_SDK_VERSIONS = {
+  rn: "2.10.10",
+  web: "3.4.0"
+};
 const localPackages = readdirSync(join(rootDir, "packages"), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => join("packages", entry.name))
@@ -91,6 +100,7 @@ try {
       name: result.name,
       version: result.version,
       tarballPath: join(tempDir, result.filename),
+      packageDir,
       manifest,
       hasNodeExport: manifest.name === "@ait-kit/api-client",
       hasRnExport: manifest.name === "@ait-kit/sdk",
@@ -190,185 +200,8 @@ try {
     }
 
     if (packedPackage.hasRnExport) {
-      // Per-platform fixtures: each installs the real tarball plus a stub of
-      // ONLY its own platform SDK, proving the two entries stay independent
-      // (an /rn consumer never needs the web SDK and vice versa, in JS or
-      // in the shipped declarations), then type-checks (bundler + NodeNext),
-      // bundles, and executes the consumer against the installed package.
-      const platforms = [
-        {
-          subpath: "rn",
-          platformPackage: "@apps-in-toss/framework",
-          externalFlag: "--external:@apps-in-toss/framework",
-          consumerImports: `import {
-  createReactNativeAds,
-  createReactNativeIdentity,
-  createReactNativeIap,
-  createReactNativeNotification,
-  createReactNativeShare,
-  createReactNativeStorage
-} from ${JSON.stringify(`${packedPackage.name}/rn`)};`,
-          consumerBody: `export const ads = createReactNativeAds();
-export const iap = createReactNativeIap({ grant: async () => {} });
-export const identity = createReactNativeIdentity();
-export const storage = createReactNativeStorage();
-export const notification = createReactNativeNotification();
-export const share = createReactNativeShare();
-export async function crossEntryInstanceofCheck(): Promise<boolean> {
-  try {
-    await iap.getPendingOrders();
-    return false;
-  } catch (error) {
-    return error instanceof SdkError;
-  }
-}
-
-// Executed by the fixture runner: must hold against the installed tarball.
-if (!(await crossEntryInstanceofCheck())) {
-  throw new Error("cross-entry SdkError instanceof check failed");
-}
-`
-        },
-        {
-          subpath: "web",
-          platformPackage: "@apps-in-toss/web-framework",
-          externalFlag: "--external:@apps-in-toss/web-framework",
-          consumerImports: `import {
-  createWebIap,
-  createWebIdentity,
-  createWebNotification,
-  createWebShare,
-  createWebStorage
-} from ${JSON.stringify(`${packedPackage.name}/web`)};`,
-          consumerBody: `export const iap = createWebIap({ grant: async () => {} });
-export const identity = createWebIdentity();
-export const storage = createWebStorage();
-export const notification = createWebNotification();
-export const share = createWebShare();
-export async function crossEntryInstanceofCheck(): Promise<boolean> {
-  try {
-    await iap.getPendingOrders();
-    return false;
-  } catch (error) {
-    return error instanceof SdkError;
-  }
-}
-
-// Executed by the fixture runner: must hold against the installed tarball.
-if (!(await crossEntryInstanceofCheck())) {
-  throw new Error("cross-entry SdkError instanceof check failed");
-}
-`
-        }
-      ];
-
-      for (const platform of platforms) {
-        // Subpath imports cleanly in plain Node even without its platform
-        // SDK: the official package is an optional peer, imported lazily.
-        const smokePath = join(installDir, `smoke-${platform.subpath}.mjs`);
-        writeFileSync(smokePath, `import ${JSON.stringify(`${packedPackage.name}/${platform.subpath}`)};\n`);
-        run(process.execPath, [smokePath], installDir);
-
-        const fixtureDir = join(installDir, `${platform.subpath}-fixture`);
-        mkdirSync(fixtureDir, { recursive: true });
-        writeFileSync(join(fixtureDir, "package.json"), JSON.stringify({ private: true, type: "module" }));
-        // Minimal stub of this fixture's platform SDK: present as a package
-        // (proving peer isolation) but with an IAP surface the loader will
-        // reject, so the executed consumer check is deterministic.
-        const stubDir = join(tempDir, "stubs", platform.platformPackage.replace("/", "-"));
-        mkdirSync(stubDir, { recursive: true });
-        writeFileSync(
-          join(stubDir, "package.json"),
-          JSON.stringify({ name: platform.platformPackage, version: "0.0.0-stub", type: "module" })
-        );
-        writeFileSync(
-          join(stubDir, "index.js"),
-          platform.subpath === "rn"
-            ? `export const loadFullScreenAd = () => () => {};\nexport const showFullScreenAd = () => () => {};\nexport const IAP = {};\n`
-            : `export const IAP = {};\n`
-        );
-        writeFileSync(
-          join(fixtureDir, "consumer.ts"),
-          `import { SdkError } from ${JSON.stringify(packedPackage.name)};
-${platform.consumerImports}
-${platform.consumerBody}
-`
-        );
-        run(
-          "npm",
-          [
-            "install",
-            "--ignore-scripts",
-            "--no-package-lock",
-            "--no-audit",
-            "--no-fund",
-            "--prefer-offline",
-            packedPackage.tarballPath,
-            "typescript@6.0.3",
-            "esbuild@0.28.2",
-            stubDir
-          ],
-          fixtureDir,
-          installCommandTimeoutMs
-        );
-        run(
-          "npm",
-          [
-            "exec",
-            "--",
-            "tsc",
-            "--noEmit",
-            "--strict",
-            "--target",
-            "es2022",
-            "--module",
-            "esnext",
-            "--moduleResolution",
-            "bundler",
-            "consumer.ts"
-          ],
-          fixtureDir
-        );
-        run(
-          "npm",
-          [
-            "exec",
-            "--",
-            "esbuild",
-            "consumer.ts",
-            "--bundle",
-            "--format=esm",
-            "--platform=node",
-            `--external:${platform.platformPackage}`,
-            "--outfile=consumer.js"
-          ],
-          fixtureDir
-        );
-        // NodeNext consumers resolve the shipped declarations directly; the
-        // emitted d.ts must carry extension-safe specifiers.
-        run(
-          "npm",
-          [
-            "exec",
-            "--",
-            "tsc",
-            "--noEmit",
-            "--strict",
-            "--target",
-            "es2022",
-            "--module",
-            "nodenext",
-            "--moduleResolution",
-            "nodenext",
-            "consumer.ts"
-          ],
-          fixtureDir
-        );
-        // Execute the bundled consumer: the cross-entry instanceof check
-        // must hold at runtime against the installed tarball (the stub IAP
-        // makes the adapter reject with a root SdkError).
-        run(process.execPath, [join(fixtureDir, "consumer.js")], fixtureDir);
-      }
+      verifySdkPlatformIsolation(packedPackage, installDir, tempDir, installCommandTimeoutMs);
+      verifySdkOfficialCompatibility(packedPackage, installDir, tempDir, installCommandTimeoutMs);
     }
     console.log(`Verified ${packedPackage.name}@${packedPackage.version}`);
   }
@@ -454,4 +287,721 @@ function run(command, args, cwd, timeoutMs = commandTimeoutMs) {
     );
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// @ait-kit/sdk platform verification
+// ---------------------------------------------------------------------------
+
+/**
+ * Proves the shipped dist files never reference the opposite platform's
+ * official SDK: /rn files only @apps-in-toss/framework, /web files only
+ * @apps-in-toss/web-framework, and the runtime-neutral root files neither.
+ */
+function verifySdkCrossPlatformPurity(packageDir) {
+  const distDir = join(packageDir, "dist");
+  const offenders = [];
+  const visit = (dir, zone) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const entryPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const childZone = entry.name === "rn" || entry.name === "web" ? entry.name : zone;
+        visit(entryPath, childZone);
+        continue;
+      }
+      if (!/\.(?:js|mjs|cjs|d\.ts)$/.test(entry.name)) continue;
+      const content = readFileSync(entryPath, "utf8");
+      const relative = relativePath(distDir, entryPath);
+      const hasRn = content.includes(RN_PLATFORM_PACKAGE);
+      const hasWeb = content.includes(WEB_PLATFORM_PACKAGE);
+      const violations =
+        zone === "rn" ? [hasWeb && WEB_PLATFORM_PACKAGE] : zone === "web" ? [hasRn && RN_PLATFORM_PACKAGE] : [hasRn && RN_PLATFORM_PACKAGE, hasWeb && WEB_PLATFORM_PACKAGE];
+      for (const violation of violations) {
+        if (violation) offenders.push(`${relative} references ${violation}`);
+      }
+    }
+  };
+  visit(distDir, "root");
+  if (offenders.length > 0) {
+    throw new Error(`Cross-platform SDK leakage in ${packageDir}:\n${offenders.join("\n")}`);
+  }
+}
+
+function relativePath(from, to) {
+  const segments = [];
+  let dir = to;
+  while (dir !== from) {
+    const parent = dirname(dir);
+    if (parent === dir) throw new Error(`${to} is not inside ${from}`);
+    segments.unshift(basename(dir));
+    dir = parent;
+  }
+  return segments.join("/");
+}
+
+/**
+ * Stub-SDK fixtures: each platform installs the real tarball plus a stub of
+ * ONLY its own platform SDK, proving the two entries stay independent (an
+ * /rn consumer never needs the web SDK and vice versa, in JavaScript and in
+ * the shipped declarations), then type-checks (bundler + NodeNext), bundles,
+ * and executes the consumer against the installed package. The stub lacks
+ * the five adapter-backed official exports, so the executed consumer also
+ * proves the default loaders report UNSUPPORTED per operation instead of
+ * guessing a call shape.
+ */
+function verifySdkPlatformIsolation(packedPackage, installDir, tempDir, installCommandTimeoutMs) {
+  const platforms = [
+    {
+      subpath: "rn",
+      platformPackage: RN_PLATFORM_PACKAGE,
+      consumerImports: `import {
+  createReactNativeAds,
+  createReactNativeIdentity,
+  createReactNativeIap,
+  createReactNativeNotification,
+  createReactNativeShare,
+  createReactNativeStorage
+} from ${JSON.stringify(`${packedPackage.name}/rn`)};`,
+      consumerBody: `export const ads = createReactNativeAds();
+export const iap = createReactNativeIap({ grant: async () => {} });
+export const identity = createReactNativeIdentity();
+export const storage = createReactNativeStorage();
+export const notification = createReactNativeNotification();
+export const share = createReactNativeShare();
+export async function crossEntryInstanceofCheck(): Promise<boolean> {
+  try {
+    await iap.getPendingOrders();
+    return false;
+  } catch (error) {
+    return error instanceof SdkError;
+  }
+}
+
+// The stub SDK exposes none of the official identity/notification/share
+// exports, so the default loaders must report UNSUPPORTED per operation —
+// never a guessed call into a missing function.
+export async function missingCapabilityCheck(): Promise<boolean> {
+  const expectUnsupported = async (action: () => Promise<unknown>, label: string) => {
+    try {
+      await action();
+      throw new Error(\`\${label}: expected UNSUPPORTED\`);
+    } catch (error) {
+      return error instanceof SdkError && error.code === "UNSUPPORTED";
+    }
+  };
+  return (
+    (await expectUnsupported(() => identity.login(), "login")) &&
+    (await expectUnsupported(() => identity.getAnonymousKey(), "anonymous key")) &&
+    (await expectUnsupported(() => share.createLink("intoss://stub"), "share link")) &&
+    (await expectUnsupported(() => share.sendMessage("x"), "share sheet")) &&
+    (await expectUnsupported(() => notification.requestAgreement("TEMPLATE_1"), "notification"))
+  );
+}
+
+// Executed by the fixture runner: must hold against the installed tarball.
+if (!(await crossEntryInstanceofCheck())) {
+  throw new Error("cross-entry SdkError instanceof check failed");
+}
+if (!(await missingCapabilityCheck())) {
+  throw new Error("missing-capability UNSUPPORTED check failed");
+}
+`
+    },
+    {
+      subpath: "web",
+      platformPackage: WEB_PLATFORM_PACKAGE,
+      consumerImports: `import {
+  createWebIap,
+  createWebIdentity,
+  createWebNotification,
+  createWebShare,
+  createWebStorage
+} from ${JSON.stringify(`${packedPackage.name}/web`)};`,
+      consumerBody: `export const iap = createWebIap({ grant: async () => {} });
+export const identity = createWebIdentity();
+export const storage = createWebStorage();
+export const notification = createWebNotification();
+export const share = createWebShare();
+export async function crossEntryInstanceofCheck(): Promise<boolean> {
+  try {
+    await iap.getPendingOrders();
+    return false;
+  } catch (error) {
+    return error instanceof SdkError;
+  }
+}
+
+export async function missingCapabilityCheck(): Promise<boolean> {
+  const expectUnsupported = async (action: () => Promise<unknown>, label: string) => {
+    try {
+      await action();
+      throw new Error(\`\${label}: expected UNSUPPORTED\`);
+    } catch (error) {
+      return error instanceof SdkError && error.code === "UNSUPPORTED";
+    }
+  };
+  return (
+    (await expectUnsupported(() => identity.login(), "login")) &&
+    (await expectUnsupported(() => share.createLink("intoss://stub"), "share link")) &&
+    (await expectUnsupported(() => share.sendMessage("x"), "share sheet")) &&
+    (await expectUnsupported(() => notification.requestAgreement("TEMPLATE_1"), "notification"))
+  );
+}
+
+if (!(await crossEntryInstanceofCheck())) {
+  throw new Error("cross-entry SdkError instanceof check failed");
+}
+if (!(await missingCapabilityCheck())) {
+  throw new Error("missing-capability UNSUPPORTED check failed");
+}
+`
+    }
+  ];
+
+  verifySdkCrossPlatformPurity(packedPackage.packageDir);
+
+  for (const platform of platforms) {
+    // Subpath imports cleanly in plain Node even without its platform
+    // SDK: the official package is an optional peer, imported lazily.
+    const smokePath = join(installDir, `smoke-${platform.subpath}.mjs`);
+    writeFileSync(smokePath, `import ${JSON.stringify(`${packedPackage.name}/${platform.subpath}`)};\n`);
+    run(process.execPath, [smokePath], installDir);
+
+    const fixtureDir = join(installDir, `${platform.subpath}-fixture`);
+    mkdirSync(fixtureDir, { recursive: true });
+    writeFileSync(join(fixtureDir, "package.json"), JSON.stringify({ private: true, type: "module" }));
+    // Minimal stub of this fixture's platform SDK: present as a package
+    // (proving peer isolation) but with an IAP surface the loader will
+    // reject, so the executed consumer check is deterministic.
+    const stubDir = join(tempDir, "stubs", platform.platformPackage.replace("/", "-"));
+    mkdirSync(stubDir, { recursive: true });
+    writeFileSync(
+      join(stubDir, "package.json"),
+      JSON.stringify({ name: platform.platformPackage, version: "0.0.0-stub", type: "module" })
+    );
+    writeFileSync(
+      join(stubDir, "index.js"),
+      platform.subpath === "rn"
+        ? `export const loadFullScreenAd = () => () => {};\nexport const showFullScreenAd = () => () => {};\nexport const IAP = {};\n`
+        : `export const IAP = {};\n`
+    );
+    writeFileSync(
+      join(fixtureDir, "consumer.ts"),
+      `import { SdkError } from ${JSON.stringify(packedPackage.name)};
+${platform.consumerImports}
+${platform.consumerBody}
+`
+    );
+    run(
+      "npm",
+      [
+        "install",
+        "--ignore-scripts",
+        "--no-package-lock",
+        "--no-audit",
+        "--no-fund",
+        "--prefer-offline",
+        // The stub platform SDK deliberately carries a fake version below
+        // the sdk's verified peer floor; the official-version compatibility
+        // is checked separately in the official fixtures below.
+        "--legacy-peer-deps",
+        packedPackage.tarballPath,
+        "typescript@6.0.3",
+        "esbuild@0.28.2",
+        stubDir
+      ],
+      fixtureDir,
+      installCommandTimeoutMs
+    );
+    runTsc(fixtureDir, "consumer.ts", "bundler");
+    run(
+      "npm",
+      [
+        "exec",
+        "--",
+        "esbuild",
+        "consumer.ts",
+        "--bundle",
+        "--format=esm",
+        "--platform=node",
+        `--external:${platform.platformPackage}`,
+        "--outfile=consumer.js"
+      ],
+      fixtureDir
+    );
+    // NodeNext consumers resolve the shipped declarations directly; the
+    // emitted d.ts must carry extension-safe specifiers.
+    runTsc(fixtureDir, "consumer.ts", "nodenext");
+    // Execute the bundled consumer: the cross-entry instanceof check and
+    // the missing-capability UNSUPPORTED checks must hold at runtime
+    // against the installed tarball.
+    run(process.execPath, [join(fixtureDir, "consumer.js")], fixtureDir);
+  }
+}
+
+function runTsc(cwd, file, moduleResolution, lib) {
+  const moduleKind = moduleResolution === "bundler" ? "esnext" : moduleResolution;
+  const args = [
+    "exec",
+    "--",
+    "tsc",
+    "--noEmit",
+    "--strict",
+    "--target",
+    "es2022",
+    "--module",
+    moduleKind,
+    "--moduleResolution",
+    moduleResolution
+  ];
+  if (lib) {
+    // Official SDK type trees (react-native et al.) are not strict-clean
+    // internally and their RN globals collide with lib.dom; React Native
+    // projects standardly enable skipLibCheck and drop the DOM lib. The
+    // consumer files themselves are still fully checked. Fixture calls
+    // WITHOUT a lib (the stub-SDK checks) keep checking the shipped
+    // declarations in full.
+    args.push("--skipLibCheck", "--lib", lib);
+  }
+  args.push(file);
+  run("npm", args, cwd);
+}
+
+/**
+ * Official-SDK fixtures: each platform installs the real tarball plus the
+ * EXACT verified official SDK release, then (1) type-checks consumers
+ * written against the official declarations — including canary imports
+ * that exist in the official package but not in @ait-kit/sdk's ambient
+ * declarations, so a masking ambient would fail the check — and (2)
+ * executes the default loaders against the real SDK distribution.
+ *
+ * RN runtime note: the full @apps-in-toss/framework entry imports UI
+ * components (react-native, Granite, TDS) that only evaluate inside the
+ * app runtime, so the executed consumer bundles the framework through a
+ * shim that re-exports @apps-in-toss/native-modules — the same package the
+ * framework itself re-exports the five adapter-backed functions from, at
+ * the same version — with the native bridge layer stubbed. This mirrors a
+ * Metro/Granite consumption graph (bundler resolution, all real SDK code,
+ * native layer replaced) inside CI.
+ */
+function verifySdkOfficialCompatibility(packedPackage, installDir, tempDir, installCommandTimeoutMs) {
+  const rnTypes = `// Type checks against the REAL @apps-in-toss/framework@${OFFICIAL_SDK_VERSIONS.rn} declarations.
+// Canaries first: these exports exist in the official package but NOT in
+// @ait-kit/sdk's ambient declaration for it — if the ambient declaration
+// masked the real types, this file would not compile.
+import { env, useGeolocation } from "${RN_PLATFORM_PACKAGE}";
+
+// The five adapter-backed exports with their verified official signatures.
+import {
+  appLogin,
+  getAnonymousKey,
+  getTossShareLink,
+  requestNotificationAgreement,
+  share
+} from "${RN_PLATFORM_PACKAGE}";
+
+export async function loginType(): Promise<{ authorizationCode: string; referrer: "DEFAULT" | "SANDBOX" }> {
+  return appLogin();
+}
+
+export async function anonymousKeyType(): Promise<{ type: "HASH"; hash: string } | "ERROR" | undefined> {
+  return getAnonymousKey();
+}
+
+export function notificationType(
+  onEvent: (result: { type: "newAgreement" | "alreadyAgreed" | "agreementRejected" }) => void,
+  onError: (error: unknown) => void
+): () => void {
+  return requestNotificationAgreement({
+    options: { templateCode: "TEMPLATE_CODE" },
+    onEvent,
+    onError
+  });
+}
+
+export function shareLinkType(path: string, ogImageUrl?: string): Promise<string> {
+  // Positional arguments — the official signature.
+  return getTossShareLink(path, ogImageUrl);
+}
+
+export function shareType(message: string): Promise<void> {
+  return share({ message });
+}
+
+// The test platform stubs are typed BY the official declarations, keeping
+// the fixtures honest about the shapes they fake.
+type AppLogin = typeof appLogin;
+type GetAnonymousKey = typeof getAnonymousKey;
+type RequestNotificationAgreement = typeof requestNotificationAgreement;
+type GetTossShareLink = typeof getTossShareLink;
+type Share = typeof share;
+export const stubAppLogin: AppLogin = () => Promise.resolve({ authorizationCode: "stub", referrer: "DEFAULT" });
+export const stubGetAnonymousKey: GetAnonymousKey = () => Promise.resolve({ type: "HASH", hash: "stub" });
+export const stubRequestNotificationAgreement: RequestNotificationAgreement = () => () => {};
+export const stubGetTossShareLink: GetTossShareLink = (path) => Promise.resolve(\`https://toss.im/\${path}\`);
+export const stubShare: Share = () => Promise.resolve();
+
+export const canary = { env, useGeolocation };
+`;
+
+  const webTypes = `// Type checks against the REAL @apps-in-toss/web-framework@${OFFICIAL_SDK_VERSIONS.web} declarations.
+// Canary: TossAuth.isIntegrated exists in the official package but NOT in
+// @ait-kit/sdk's ambient declaration — if the ambient masked the real
+// types, this file would not compile.
+import { Notification, Share, TossAuth, User } from "${WEB_PLATFORM_PACKAGE}";
+
+export async function loginType(): Promise<{ authorizationCode: string; referrer: "DEFAULT" | "SANDBOX" }> {
+  return TossAuth.login();
+}
+
+export async function anonymousKeyType(): Promise<{ type: "HASH"; hash: string }> {
+  return User.getAnonymousKey();
+}
+
+export function notificationType(
+  onEvent: (result: { type: "newAgreement" | "alreadyAgreed" | "agreementRejected" }) => void,
+  onError: (error: unknown) => void
+): () => void {
+  return Notification.requestAgreement({
+    options: { templateCode: "TEMPLATE_CODE" },
+    onEvent,
+    onError
+  });
+}
+
+export function shareLinkType(path: string, ogImageUrl?: string): Promise<string> {
+  return Share.createLink({ path, ogImageUrl });
+}
+
+export function shareType(message: string): Promise<void> {
+  return Share.sendMessage({ message });
+}
+
+export const canary = { isIntegrated: TossAuth.isIntegrated };
+`;
+
+  const rnRuntime = `import { SdkError } from "${packedPackage.name}";
+import {
+  createReactNativeIdentity,
+  createReactNativeNotification,
+  createReactNativeShare,
+  createReactNativeStorage
+} from "${packedPackage.name}/rn";
+
+// The stubbed native bridge rejects every call with this marker, proving
+// the REAL official function ran (as opposed to an adapter stub).
+const BRIDGE_ERROR = "native bridge unavailable in the tarball fixture";
+
+// The fixture's own failure sentinel: must always escape the catch blocks
+// below instead of being mistaken for an official-SDK rejection.
+class FixtureFailure extends Error {}
+
+function failIfAdapterError(error: unknown, label: string): void {
+  if (error instanceof FixtureFailure) throw error;
+  if (error instanceof SdkError) {
+    throw new Error(\`\${label}: adapter produced \${error.code} (\${error.message}) instead of reaching the official SDK function\`);
+  }
+}
+
+// For paths whose rejection is deterministic (the bridge stub rejects
+// every awaited bridge call with the marker).
+function expectBridgeRejection(error: unknown, label: string): void {
+  failIfAdapterError(error, label);
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.includes(BRIDGE_ERROR)) {
+    throw new Error(\`\${label}: rejection did not come from the stubbed bridge: \${message}\`);
+  }
+}
+
+// 1. Identity: the real appLogin/getAnonymousKey run and their bridge
+// rejections propagate with the marker — NOT a namespace-mismatch
+// UNSUPPORTED.
+const identity = createReactNativeIdentity();
+try {
+  await identity.login();
+  throw new FixtureFailure("login: expected the stubbed bridge to reject");
+} catch (error) {
+  expectBridgeRejection(error, "login");
+}
+try {
+  await identity.getAnonymousKey();
+  throw new FixtureFailure("getAnonymousKey: expected the stubbed bridge to reject or resolve the ERROR sentinel");
+} catch (error) {
+  if (error instanceof FixtureFailure) throw error;
+  // With the stubbed bridge the real function deterministically resolves
+  // its documented "ERROR" sentinel (rejected by the shared validator as
+  // INVALID_ANONYMOUS_KEY) or rejects with the bridge marker — both prove
+  // the official function ran; the regression would be UNSUPPORTED.
+  const isSentinel = error instanceof SdkError && error.code === "INVALID_ANONYMOUS_KEY";
+  const isBridge = error instanceof Error && error.message.includes(BRIDGE_ERROR);
+  if (!isSentinel && !isBridge) {
+    throw new Error(\`getAnonymousKey: rejection did not come from the official function: \${String(error)}\`);
+  }
+}
+
+// 2. Share link: positional arguments reach the real getTossShareLink.
+const share = createReactNativeShare();
+try {
+  await share.createLink("intoss://fixture");
+  throw new FixtureFailure("createLink: expected the stubbed bridge to reject");
+} catch (error) {
+  expectBridgeRejection(error, "createLink");
+}
+
+// 3. Share sheet: the real share() runs. In this stubbed environment it
+// either resolves (completed: the SDK call finished — its documented
+// meaning) or rejects through the bridge marker (failed). Either proves
+// the real function was reached; the regression would be UNSUPPORTED.
+const sheetResult = await share.sendMessage("fixture message");
+const sheetOk =
+  sheetResult.status === "completed" ||
+  (sheetResult.status === "failed" && sheetResult.reason?.includes(BRIDGE_ERROR));
+if (!sheetOk) {
+  throw new FixtureFailure(\`sendMessage: unexpected result \${JSON.stringify(sheetResult)}\`);
+}
+
+// 4. Notification: the real requestNotificationAgreement registers and
+// the real SDK surfaces the stubbed bridge failure through onError,
+// settling as failed with the marker (or, without the bridge error, by
+// the request deadline) — never an adapter UNSUPPORTED.
+const notification = createReactNativeNotification({ timeoutMs: 250 });
+await notification.requestAgreement("TEMPLATE_1").then(
+  (result) => {
+    const settled =
+      (result.status === "failed" && result.reason?.includes(BRIDGE_ERROR)) ||
+      result.status === "timeout";
+    if (!settled) {
+      throw new FixtureFailure(\`requestAgreement: unexpected result \${JSON.stringify(result)}\`);
+    }
+  },
+  (error) => {
+    failIfAdapterError(error, "requestAgreement");
+    throw new FixtureFailure("requestAgreement: expected the request to settle");
+  }
+);
+
+// 5. Storage: the real namespaced Storage surface passes the adapter's
+// all-or-nothing check and the bridge rejection propagates.
+const storage = createReactNativeStorage();
+try {
+  await storage.get("fixture-key");
+  throw new FixtureFailure("storage.get: expected the stubbed bridge to reject");
+} catch (error) {
+  expectBridgeRejection(error, "storage.get");
+}
+`;
+
+  const webRuntime = `import { SdkError } from "${packedPackage.name}";
+import {
+  createWebIdentity,
+  createWebNotification,
+  createWebShare,
+  createWebStorage
+} from "${packedPackage.name}/web";
+
+// Outside the Toss webview every official web SDK call throws the
+// environment assertion — proving the real module loaded and the shared
+// namespaced contract matched it. Defining window with the SDK's
+// constants globals (modern app version so the SDK's own version gates
+// pass) but WITHOUT the React Native WebView bridge routes every call
+// through that assertion deterministically, instead of raw
+// "window is not defined" ReferenceErrors.
+(globalThis as { window?: unknown }).window = {
+  ReactNativeWebView: null,
+  __appsInTossConstants: {
+    tossAppVersion: "9.9.9",
+    operationalEnvironment: "toss",
+    platformOS: "android"
+  }
+};
+const WEBVIEW_ERROR = "apps-in-toss 웹뷰 환경이 아니에요";
+
+// The fixture's own failure sentinel: must always escape the catch blocks
+// below instead of being mistaken for an official-SDK rejection.
+class FixtureFailure extends Error {}
+
+function expectWebviewRejection(error: unknown, label: string): void {
+  if (error instanceof FixtureFailure) throw error;
+  if (error instanceof SdkError) {
+    throw new Error(\`\${label}: adapter produced \${error.code} (\${error.message}) instead of reaching the official SDK\`);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.includes(WEBVIEW_ERROR)) {
+    throw new Error(\`\${label}: rejection did not come from the official webview assertion: \${message}\`);
+  }
+}
+
+const identity = createWebIdentity();
+try {
+  await identity.login();
+  throw new FixtureFailure("login: expected the webview assertion");
+} catch (error) {
+  expectWebviewRejection(error, "login");
+}
+try {
+  await identity.getAnonymousKey();
+  throw new FixtureFailure("getAnonymousKey: expected the webview assertion");
+} catch (error) {
+  // The official web SDK maps environment failures in the anonymous-key
+  // path to its own documented unknown-error message instead of the raw
+  // webview assertion (the "ERROR" sentinel equivalent) — both prove the
+  // real function ran.
+  if (error instanceof FixtureFailure) throw error;
+  if (error instanceof SdkError) {
+    throw new Error(\`getAnonymousKey: adapter produced \${error.code} (\${error.message}) instead of reaching the official SDK\`);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.includes(WEBVIEW_ERROR) && !message.includes("사용자 키 조회")) {
+    throw new Error(\`getAnonymousKey: rejection did not come from the official SDK: \${message}\`);
+  }
+}
+
+const share = createWebShare();
+try {
+  await share.createLink("intoss://fixture");
+  throw new FixtureFailure("createLink: expected the webview assertion");
+} catch (error) {
+  expectWebviewRejection(error, "createLink");
+}
+const sheetResult = await share.sendMessage("fixture message");
+if (sheetResult.status !== "failed" || !sheetResult.reason?.includes(WEBVIEW_ERROR)) {
+  throw new FixtureFailure(\`sendMessage: unexpected result \${JSON.stringify(sheetResult)}\`);
+}
+
+// The official Notification.requestAgreement asserts the webview during
+// registration; the event flow surfaces that as a rejection (never an
+// adapter UNSUPPORTED).
+const notification = createWebNotification({ timeoutMs: 250 });
+try {
+  await notification.requestAgreement("TEMPLATE_1");
+  throw new FixtureFailure("requestAgreement: expected the webview assertion");
+} catch (error) {
+  expectWebviewRejection(error, "requestAgreement");
+}
+
+const storage = createWebStorage();
+try {
+  await storage.get("fixture-key");
+  throw new FixtureFailure("storage.get: expected the webview assertion");
+} catch (error) {
+  expectWebviewRejection(error, "storage.get");
+}
+`;
+
+  const fixtures = [
+    {
+      name: "rn-official",
+      install: [`${RN_PLATFORM_PACKAGE}@${OFFICIAL_SDK_VERSIONS.rn}`],
+      typesFile: rnTypes,
+      runtimeFile: rnRuntime,
+      tscLib: "es2022",
+      bundleArgs: (fixtureDir) => [
+        "runtime.ts",
+        "--bundle",
+        "--format=esm",
+        "--platform=node",
+        // Metro-style graph: the full framework entry imports UI modules
+        // that only evaluate in the app runtime, so the runtime fixture
+        // resolves the framework to its native-modules re-export (the
+        // package those five exports are defined in) and stubs the native
+        // bridge layer.
+        `--alias:${RN_PLATFORM_PACKAGE}=./framework-shim.mjs`,
+        "--alias:react-native=./native-stubs/react-native.js",
+        "--alias:@granite-js/react-native=./native-stubs/granite-react-native.js",
+        "--alias:brick-module=./native-stubs/brick-module.js",
+        "--outfile=runtime.bundle.mjs"
+      ],
+      extraFiles: (fixtureDir) => {
+        writeFileSync(
+          join(fixtureDir, "framework-shim.mjs"),
+          `// Re-exports the package that defines the five adapter-backed exports.\nexport * from "@apps-in-toss/native-modules";\n`
+        );
+        const stubsDir = join(fixtureDir, "native-stubs");
+        mkdirSync(stubsDir, { recursive: true });
+        writeFileSync(
+          join(stubsDir, "brick-module.js"),
+          `// Native bridge stub: every bridge call rejects with the fixture marker
+// (proving real SDK code reached the native boundary). The rejection is
+// pre-handled so the SDK's own fire-and-forget calls (event listener
+// registration during module init) cannot crash the process on an
+// unhandled rejection; awaiting the returned promise still rejects.
+const bridgeUnavailable = () => {
+  const rejection = Promise.reject(new Error("native bridge unavailable in the tarball fixture"));
+  rejection.catch(() => {});
+  return rejection;
+};
+const nativeModule = new Proxy({}, {
+  get(_target, prop) {
+    if (prop === "addListener" || prop === "removeListeners") return () => {};
+    // Sync constants call: a modern app version so the SDK's own version
+    // gates pass and every flow reaches the (rejecting) async bridge.
+    if (prop === "getConstants") {
+      return () => ({ tossAppVersion: "9.9.9" });
+    }
+    return (..._args) => bridgeUnavailable();
+  }
+});
+export const BrickModule = { get: () => nativeModule, getRegisteredModules: () => [] };
+export default BrickModule;
+`
+        );
+        writeFileSync(
+          join(stubsDir, "react-native.js"),
+          `export const AppRegistry = { registerComponent: () => {} };\nexport const NativeModules = {};\nexport const Platform = { OS: "android", select: (o) => o?.android };\nexport const Linking = { openURL: async () => {}, addEventListener: () => ({ remove: () => {} }) };\nexport default {};\n`
+        );
+        writeFileSync(
+          join(stubsDir, "granite-react-native.js"),
+          `export class GraniteEventDefinition extends EventTarget {}\nexport class GraniteEvent extends EventTarget {}\nexport const Granite = {};\nexport const getSchemeUri = () => "intoss://stub";\nexport const openURL = async () => {};\nexport default {};\n`
+        );
+      }
+    },
+    {
+      name: "web-official",
+      install: [`${WEB_PLATFORM_PACKAGE}@${OFFICIAL_SDK_VERSIONS.web}`],
+      typesFile: webTypes,
+      runtimeFile: webRuntime,
+      tscLib: "es2022,dom",
+      // The real web SDK is pure browser-side JS: bundle it INTO the
+      // runtime fixture (not external) to exercise the real web bundle path.
+      bundleArgs: () => [
+        "runtime.ts",
+        "--bundle",
+        "--format=esm",
+        "--platform=node",
+        "--outfile=runtime.bundle.mjs"
+      ],
+      extraFiles: () => {}
+    }
+  ];
+
+  for (const fixture of fixtures) {
+    const fixtureDir = join(installDir, fixture.name);
+    mkdirSync(fixtureDir, { recursive: true });
+    writeFileSync(join(fixtureDir, "package.json"), JSON.stringify({ private: true, type: "module" }));
+    writeFileSync(join(fixtureDir, "official-types.ts"), fixture.typesFile);
+    writeFileSync(join(fixtureDir, "runtime.ts"), fixture.runtimeFile);
+    fixture.extraFiles(fixtureDir);
+    run(
+      "npm",
+      [
+        "install",
+        "--ignore-scripts",
+        "--no-package-lock",
+        "--no-audit",
+        "--no-fund",
+        "--prefer-offline",
+        packedPackage.tarballPath,
+        "typescript@6.0.3",
+        "esbuild@0.28.2",
+        ...fixture.install
+      ],
+      fixtureDir,
+      installCommandTimeoutMs
+    );
+    runTsc(fixtureDir, "official-types.ts", "bundler", fixture.tscLib);
+    runTsc(fixtureDir, "official-types.ts", "nodenext", fixture.tscLib);
+    runTsc(fixtureDir, "runtime.ts", "bundler", fixture.tscLib);
+    run("npm", ["exec", "--", "esbuild", ...fixture.bundleArgs(fixtureDir)], fixtureDir);
+    run(process.execPath, [join(fixtureDir, "runtime.bundle.mjs")], fixtureDir);
+  }
 }

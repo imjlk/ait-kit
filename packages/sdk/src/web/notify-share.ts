@@ -61,8 +61,9 @@ export interface WebShare {
   /** Creates a share link for an `intoss://` deeplink path. */
   createLink(path: string, ogImageUrl?: string): Promise<string>;
   /**
-   * Opens the native share sheet; `closed` never proves the user shared and
-   * never grants reward eligibility.
+   * Opens the native share sheet; `completed` means only that the SDK share
+   * call finished — it never proves the user shared and never grants reward
+   * eligibility.
    */
   sendMessage(message: string): Promise<SdkShareUiResult>;
 }
@@ -113,7 +114,7 @@ function normalizeWebNotificationLoader(
   framework: WebNotificationOptions["framework"]
 ): NotificationPlatformLoader {
   if (!framework) {
-    return createDefaultWebModuleLoader<NotificationPlatformSdk>();
+    return createDefaultWebNotificationLoader();
   }
   if (typeof framework === "function") {
     return framework;
@@ -125,7 +126,7 @@ function normalizeWebShareLoader(
   framework: WebShareOptions["framework"]
 ): SharePlatformLoader {
   if (!framework) {
-    return createDefaultWebModuleLoader<SharePlatformSdk>();
+    return createDefaultWebShareLoader();
   }
   if (typeof framework === "function") {
     return framework;
@@ -133,16 +134,36 @@ function normalizeWebShareLoader(
   return async () => ({ available: true, module: framework });
 }
 
-function createDefaultWebModuleLoader<T>(): () => Promise<
-  { available: true; module: T } | { available: false; reason: string }
-> {
-  let cached: T | undefined;
+// See createDefaultWebIdentityLoader in ./identity.ts: the web SDK already
+// matches the shared contract shapes, so no conversion or assertion is used.
+function createDefaultWebNotificationLoader(): NotificationPlatformLoader {
+  let cached: NotificationPlatformSdk | undefined;
   return async () => {
     if (cached) {
       return { available: true, module: cached };
     }
     try {
-      const framework = (await import("@apps-in-toss/web-framework")) as T;
+      const framework: NotificationPlatformSdk = await import("@apps-in-toss/web-framework");
+      cached = framework;
+      return { available: true, module: cached };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        available: false,
+        reason: `failed to import @apps-in-toss/web-framework: ${message}`
+      };
+    }
+  };
+}
+
+function createDefaultWebShareLoader(): SharePlatformLoader {
+  let cached: SharePlatformSdk | undefined;
+  return async () => {
+    if (cached) {
+      return { available: true, module: cached };
+    }
+    try {
+      const framework: SharePlatformSdk = await import("@apps-in-toss/web-framework");
       cached = framework;
       return { available: true, module: cached };
     } catch (error) {

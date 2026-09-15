@@ -253,12 +253,12 @@ describe("@ait-kit/sdk share", () => {
     await expect(share.createLink("")).rejects.toMatchObject({ code: "INVALID_SHARE_PATH" });
   });
 
-  test("reports share sheet closure without claiming completion", async () => {
+  test("reports the SDK share call completing without claiming the user shared", async () => {
     const fake = fakeSharePlatform();
     const share = createReactNativeShare({ framework: fake.platform });
 
     const result = await share.sendMessage("look at this");
-    expect(result).toEqual({ status: "closed" });
+    expect(result).toEqual({ status: "completed" });
     expect(fake.seenMessages).toEqual(["look at this"]);
   });
 
@@ -298,7 +298,7 @@ describe("@ait-kit/sdk share", () => {
 
     const link = await share.createLink("intoss://app");
     expect(typeof link).toBe("string");
-    await expect(share.sendMessage("hello")).resolves.toEqual({ status: "closed" });
+    await expect(share.sendMessage("hello")).resolves.toEqual({ status: "completed" });
   });
 
   test("web share rejects with SDK_UNAVAILABLE without the web SDK", async () => {

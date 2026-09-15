@@ -63,12 +63,14 @@ export type SdkNotificationAgreementResult =
   | { status: "timeout"; templateCode: string; reason?: string };
 
 /**
- * Result of opening the share UI. `closed` means the native share sheet
- * flow ended normally — it does NOT prove the user actually shared, and it
- * never grants share-reward eligibility on its own.
+ * Result of opening the share UI. `completed` means ONLY that the SDK share
+ * call finished — it does NOT prove the share sheet opened or closed, that
+ * the user actually shared, and it never grants share-reward eligibility.
+ * (Renamed from `closed` in 0.3.0: the underlying SDKs guarantee the call
+ * completing, not the sheet's lifecycle.)
  */
 export type SdkShareUiResult =
-  | { status: "closed" }
+  | { status: "completed" }
   | { status: "failed"; code?: string; reason?: string };
 
 // --------------------------------------------------------------------------

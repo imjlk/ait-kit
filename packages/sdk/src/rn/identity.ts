@@ -5,6 +5,7 @@ import {
   runSdkGetAnonymousKey,
   runSdkLogin
 } from "../identity/platform-contract.js";
+import { adaptOfficialRnIdentity } from "./official-module.js";
 
 export interface ReactNativeIdentityOptions {
   /**
@@ -50,6 +51,12 @@ export function normalizeIdentityLoader(
   return async () => ({ available: true, module: framework });
 }
 
+/**
+ * Default loader: imports the official `@apps-in-toss/framework` lazily and
+ * converts its flat export surface (`appLogin`, `getAnonymousKey`) to the
+ * shared identity contract. A failed import is never cached (a later call
+ * retries); successful loads cache the converted module.
+ */
 function createDefaultRnIdentityLoader(): IdentityPlatformLoader {
   let cached: IdentityPlatformSdk | undefined;
   return async () => {
@@ -57,8 +64,7 @@ function createDefaultRnIdentityLoader(): IdentityPlatformLoader {
       return { available: true, module: cached };
     }
     try {
-      const framework = (await import("@apps-in-toss/framework")) as IdentityPlatformSdk;
-      cached = framework;
+      cached = adaptOfficialRnIdentity(await import("@apps-in-toss/framework"));
       return { available: true, module: cached };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -46,10 +46,10 @@ export function validateSharePath(path: string): string {
 }
 
 /**
- * Wraps the share-UI call: a resolution means the native share sheet flow
- * ended normally ("closed") — it never proves the user actually shared and
- * never grants reward eligibility. Rejections surface as failed with the
- * platform's error code/message preserved.
+ * Wraps the share-UI call: a resolution means ONLY that the SDK share call
+ * completed ("completed") — it never proves the share sheet opened or that
+ * the user actually shared, and never grants reward eligibility. Rejections
+ * surface as failed with the platform's error code/message preserved.
  */
 export async function runShareUi(
   platform: SharePlatformSdk,
@@ -57,7 +57,7 @@ export async function runShareUi(
 ): Promise<SdkShareUiResult> {
   try {
     await platform.Share!.sendMessage!({ message });
-    return { status: "closed" };
+    return { status: "completed" };
   } catch (error) {
     const code = readErrorCode(error);
     return {
