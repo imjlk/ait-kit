@@ -1,4 +1,4 @@
-import type { FullScreenAdSupport } from "./framework-contract";
+import type { FullScreenAdSupport } from "./framework-contract.js";
 
 /**
  * Result of trying to load the official framework module. The boolean shape

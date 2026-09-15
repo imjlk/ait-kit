@@ -6,7 +6,7 @@
  * SDK_UNAVAILABLE when it is absent.
  */
 declare module "@apps-in-toss/framework" {
-  import type { FullScreenAdSupport } from "./framework-contract";
+  import type { FullScreenAdSupport } from "./framework-contract.js";
 
   export const loadFullScreenAd: FullScreenAdSupport["loadFullScreenAd"];
   export const showFullScreenAd: FullScreenAdSupport["showFullScreenAd"];

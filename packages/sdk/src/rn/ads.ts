@@ -1,7 +1,13 @@
-import { SdkError, type AdReward, type AdShowResult } from "../index";
-import { runEventFlow } from "../event-flow";
-import type { FullScreenAdShowEvent, FullScreenAdSupport } from "./framework-contract";
-import { createDefaultFrameworkLoader, type FrameworkLoader } from "./framework-loader";
+// Relative import: the package ships per-file output (no bundling), so
+// the /rn entry and the root entry share one SdkError constructor and
+// `instanceof` holds for consumers importing either entry.
+import { SdkError, type AdReward, type AdShowResult } from "../index.js";
+import { runEventFlow } from "../event-flow.js";
+import type { FullScreenAdShowEvent, FullScreenAdSupport } from "./framework-contract.js";
+import {
+  createDefaultFrameworkLoader,
+  type FrameworkLoader
+} from "./framework-loader.js";
 
 /** Ad kinds the SDK distinguishes; only full-screen ads exist today. */
 export type SdkAdType = "fullscreen";
@@ -15,7 +21,10 @@ export interface ReactNativeAdsOptions {
   framework?: FrameworkLoader | FullScreenAdSupport;
   /** Overall deadline for the show flow (default 60000ms; 0 disables). */
   showTimeoutMs?: number;
-  /** Deadline for each load flow (default 30000ms; 0 disables). */
+  /**
+   * Overall deadline for each load, covering framework acquisition and the
+   * provider load flow (default 30000ms; 0 disables).
+   */
   loadTimeoutMs?: number;
 }
 
@@ -23,15 +32,18 @@ export interface ReactNativeAds {
   /** Loads (or joins an in-flight load of) the full-screen ad for adGroupId. */
   loadFullScreenAd(adGroupId: string): Promise<void>;
   /**
-   * Shows the previously loaded full-screen ad and resolves with its
-   * terminal outcome. The ad is single-use: after the flow ends, a new load
-   * is required before the next show.
+   * Shows the full-screen ad whose load already completed and resolves with
+   * its terminal outcome. The ad is single-use and claimed synchronously:
+   * once a show starts, the unit needs a fresh load for the next attempt.
    */
   showFullScreenAd(adGroupId: string): Promise<AdShowResult>;
 }
 
 type LoadFlowEvent = { type: "loaded" } | { type: "sdkError"; error: unknown };
 type ShowFlowEvent = FullScreenAdShowEvent | { type: "sdkError"; error: unknown };
+
+/** A load is either in flight or completed; absent means "needs load". */
+type LoadSlot = { kind: "loading"; promise: Promise<void> } | { kind: "loaded" };
 
 const DEFAULT_SHOW_TIMEOUT_MS = 60_000;
 const DEFAULT_LOAD_TIMEOUT_MS = 30_000;
@@ -48,81 +60,95 @@ export function createReactNativeAds(options: ReactNativeAdsOptions = {}): React
   const showTimeoutMs = options.showTimeoutMs ?? DEFAULT_SHOW_TIMEOUT_MS;
   const loadTimeoutMs = options.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS;
 
-  // Load state keyed by `${adType}:${adGroupId}`. Absent means "needs load";
-  // a resolved promise is the loaded marker consumed by the show flow.
-  const loads = new Map<string, Promise<void>>();
+  const slots = new Map<string, LoadSlot>();
   const showing = new Set<string>();
 
   const adKey = (adType: SdkAdType, adGroupId: string) => `${adType}:${adGroupId}`;
 
   const load = (adGroupId: string): Promise<void> => {
     const id = adKey("fullscreen", adGroupId);
-    const inFlight = loads.get(id);
-    // A duplicate load joins the in-flight (or already loaded) request
-    // instead of stacking a second SDK registration for the same unit.
-    if (inFlight) {
-      return inFlight;
+    const existing = slots.get(id);
+    // Duplicate loads join the in-flight request, and an already-completed
+    // load stays loaded until a show claims it - neither re-registers.
+    if (existing) {
+      return existing.kind === "loaded" ? Promise.resolve() : existing.promise;
     }
 
     const request = (async () => {
-      const framework = await loadFramework();
-      if (
-        typeof framework.loadFullScreenAd.isSupported === "function" &&
-        !framework.loadFullScreenAd.isSupported()
-      ) {
-        throw new SdkError("UNSUPPORTED", "full-screen ads are not supported on this app version");
-      }
-      const outcome = await runEventFlow<LoadFlowEvent, void | SdkError>({
-        register: (emit) =>
-          framework.loadFullScreenAd({
-            options: { adGroupId },
-            onEvent: emit,
-            onError: (error) => emit({ type: "sdkError", error })
-          }),
-        reduce: (event) =>
-          event.type === "loaded"
-            ? { done: true, result: undefined }
-            : { done: true, result: toSdkError("load", event.error) },
-        onTimeout: () => new SdkError("UNSUPPORTED", "full-screen ad load timed out"),
-        timeoutMs: loadTimeoutMs
-      });
-      if (outcome instanceof SdkError) {
-        throw outcome;
-      }
+      // The deadline covers framework acquisition as well as the provider
+      // load flow: a hanging loader must not outlive loadTimeoutMs.
+      const acquireAndLoad = (async () => {
+        const framework = await loadFramework();
+        if (
+          typeof framework.loadFullScreenAd.isSupported === "function" &&
+          !framework.loadFullScreenAd.isSupported()
+        ) {
+          throw new SdkError("UNSUPPORTED", "full-screen ads are not supported on this app version");
+        }
+        const outcome = await runEventFlow<LoadFlowEvent, void | SdkError>({
+          register: (emit) =>
+            framework.loadFullScreenAd({
+              options: { adGroupId },
+              onEvent: emit,
+              onError: (error) => emit({ type: "sdkError", error })
+            }),
+          reduce: (event) =>
+            event.type === "loaded"
+              ? { done: true, result: undefined }
+              : { done: true, result: loadFailure(event.error) },
+          onTimeout: () => new SdkError("AD_LOAD_TIMEOUT", "full-screen ad load timed out"),
+          timeoutMs: loadTimeoutMs
+        });
+        if (outcome instanceof SdkError) {
+          throw outcome;
+        }
+      })();
+      return await withDeadline(acquireAndLoad, loadTimeoutMs);
     })();
 
-    loads.set(id, request);
-    // A failed load never blocks the next attempt: clear the slot on
-    // rejection so a retry registers fresh. Successful loads keep their
-    // resolved marker until the show flow consumes it.
-    request.catch(() => {
-      loads.delete(id);
-    });
+    slots.set(id, { kind: "loading", promise: request });
+    request
+      .then(() => {
+        // Only promote when this request still owns the slot (a show cannot
+        // have claimed it before completion, but be explicit anyway).
+        if (slots.get(id)?.kind === "loading") {
+          slots.set(id, { kind: "loaded" });
+        }
+      })
+      .catch(() => {
+        // A failed load frees the slot so the next attempt retries.
+        if (slots.get(id)?.kind === "loading") {
+          slots.delete(id);
+        }
+      });
     return request;
   };
 
   const show = (adGroupId: string): Promise<AdShowResult> => {
     const id = adKey("fullscreen", adGroupId);
-    const loaded = loads.get(id);
-    if (!loaded) {
-      return Promise.reject(
-        new SdkError("AD_NOT_LOADED", `loadFullScreenAd must succeed before showing ad group ${adGroupId}`)
-      );
-    }
     if (showing.has(id)) {
       return Promise.reject(
         new SdkError("AD_ALREADY_SHOWING", `ad group ${adGroupId} is already being shown`)
       );
     }
-    // Claim the showing slot synchronously so a concurrent call cannot slip
-    // past the guard while this one is still awaiting.
+    const slot = slots.get(id);
+    if (!slot || slot.kind === "loading") {
+      return Promise.reject(
+        new SdkError(
+          "AD_NOT_LOADED",
+          `loadFullScreenAd must complete before showing ad group ${adGroupId}`
+        )
+      );
+    }
+    // Claim synchronously: the loaded marker is consumed the moment the show
+    // starts, so a concurrent reload registers fresh instead of aliasing a
+    // marker this show will never own again.
+    slots.delete(id);
     showing.add(id);
 
     return (async () => {
       let reward: AdReward | undefined;
       try {
-        // Surface a failed load through the show call without swallowing it.
-        await loaded;
         const framework = await loadFramework();
         if (
           typeof framework.showFullScreenAd.isSupported === "function" &&
@@ -153,10 +179,6 @@ export function createReactNativeAds(options: ReactNativeAdsOptions = {}): React
         });
       } finally {
         showing.delete(id);
-        // Full-screen ads are single-use: consume the loaded marker so the
-        // next attempt must load again. A failed load also clears the way
-        // for a retry.
-        loads.delete(id);
       }
     })();
   };
@@ -179,6 +201,8 @@ function reduceShowEvent(
 ): { done: true; result: AdShowResult } | { done: false } {
   switch (event.type) {
     case "userEarnedReward": {
+      // Runtime guard against payload-shape drift; the typed contract marks
+      // data as required.
       if (event.data) {
         setReward({ unitType: event.data.unitType, unitAmount: event.data.unitAmount });
       }
@@ -200,11 +224,30 @@ function reduceShowEvent(
   }
 }
 
-function toSdkError(phase: "load" | "show", error: unknown): SdkError {
+/** Transient provider failures are retryable and must not read as UNSUPPORTED. */
+function loadFailure(error: unknown): SdkError {
   if (error instanceof SdkError) return error;
-  return new SdkError("UNSUPPORTED", `full-screen ad ${phase} failed: ${errorMessage(error)}`, {
+  return new SdkError("AD_LOAD_FAILED", `full-screen ad load failed: ${errorMessage(error)}`, {
     cause: error
   });
+}
+
+async function withDeadline<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  if (!(timeoutMs > 0)) {
+    return promise;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new SdkError("AD_LOAD_TIMEOUT", "full-screen ad load timed out")),
+      timeoutMs
+    );
+  });
+  try {
+    return await Promise.race([promise, deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function errorMessage(error: unknown) {

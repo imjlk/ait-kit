@@ -78,7 +78,15 @@ export function runEventFlow<TEvent, TResult>(options: EventFlowOptions<TEvent, 
 
     const emit = (event: TEvent) => {
       if (settled) return;
-      const resolution = reduce(event);
+      let resolution: EventFlowResolution<TEvent, TResult>;
+      try {
+        resolution = reduce(event);
+      } catch (error) {
+        // A throwing reducer must fail the flow instead of leaving it
+        // pending until the deadline (which may be disabled).
+        fail(error);
+        return;
+      }
       if (resolution?.done) {
         settle(resolution.result);
       }

@@ -21,11 +21,11 @@ export {
   type ReactNativeAds,
   type ReactNativeAdsOptions,
   type SdkAdType
-} from "./ads";
-export { createDefaultFrameworkLoader, type FrameworkLoader } from "./framework-loader";
+} from "./ads.js";
+export { createDefaultFrameworkLoader, type FrameworkLoader } from "./framework-loader.js";
 export type {
   FullScreenAdShowEvent,
   FullScreenAdSupport,
   LoadFullScreenAdParams,
   ShowFullScreenAdParams
-} from "./framework-contract";
+} from "./framework-contract.js";

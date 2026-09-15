@@ -146,7 +146,7 @@ describe("@ait-kit/sdk/rn ads", () => {
     const ads = createReactNativeAds({ framework, loadTimeoutMs: 100 });
 
     await expect(ads.loadFullScreenAd("group-a")).rejects.toMatchObject({
-      code: "UNSUPPORTED",
+      code: "AD_LOAD_FAILED",
       message: expect.stringContaining("no fill")
     });
     await expect(ads.loadFullScreenAd("group-a")).resolves.toBeUndefined();
@@ -217,6 +217,62 @@ describe("@ait-kit/sdk/rn ads", () => {
     const secondCall = framework.calls.filter((call) => call.phase === "show").at(-1);
     secondCall!.emit({ type: "dismissed" });
     await expect(second).resolves.toEqual({ status: "dismissed" });
+  });
+
+  test("rejects a show while the load is still in flight", async () => {
+    const framework = fakeFramework((call) => {
+      if (call.phase === "load") {
+        queueMicrotask(() => call.emit({ type: "loaded" }));
+      }
+    });
+    const ads = createReactNativeAds({ framework });
+
+    const loading = ads.loadFullScreenAd("group-a");
+    await expect(ads.showFullScreenAd("group-a")).rejects.toMatchObject({ code: "AD_NOT_LOADED" });
+    await loading;
+    const done = ads.showFullScreenAd("group-a");
+    await Bun.sleep(1); // let the show register
+    framework.calls
+      .filter((call) => call.phase === "show")
+      .forEach((call) => call.emit({ type: "dismissed" }));
+    await expect(done).resolves.toEqual({ status: "dismissed" });
+  });
+
+  test("a reload during an active show registers a fresh load", async () => {
+    const framework = fakeFramework((call) => {
+      if (call.phase === "load") {
+        queueMicrotask(() => call.emit({ type: "loaded" }));
+      }
+    });
+    const ads = createReactNativeAds({ framework, showTimeoutMs: 5_000 });
+
+    await ads.loadFullScreenAd("group-a");
+    const showing = ads.showFullScreenAd("group-a");
+    // Reload while the show is running: the previous marker was claimed, so
+    // this is a real new registration the next show can use.
+    await ads.loadFullScreenAd("group-a");
+    expect(framework.calls.filter((call) => call.phase === "load")).toHaveLength(2);
+
+    const showCall = framework.calls.filter((call) => call.phase === "show").at(-1);
+    showCall!.emit({ type: "dismissed" });
+    await expect(showing).resolves.toEqual({ status: "dismissed" });
+    // The reloaded marker survived the first show's cleanup.
+    const next = ads.showFullScreenAd("group-a");
+    await Bun.sleep(1);
+    framework.calls
+      .filter((call) => call.phase === "show")
+      .slice(-1)
+      .forEach((call) => call.emit({ type: "dismissed" }));
+    await expect(next).resolves.toEqual({ status: "dismissed" });
+  });
+
+  test("bounds framework acquisition with the load deadline", async () => {
+    const ads = createReactNativeAds({
+      framework: () => new Promise(() => {}), // loader never resolves
+      loadTimeoutMs: 20
+    });
+
+    await expect(ads.loadFullScreenAd("group-a")).rejects.toMatchObject({ code: "AD_LOAD_TIMEOUT" });
   });
 
   test("rejects with SDK_UNAVAILABLE when the framework is missing", async () => {

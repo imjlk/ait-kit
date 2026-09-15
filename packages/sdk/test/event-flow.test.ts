@@ -132,6 +132,25 @@ describe("@ait-kit/sdk event flow", () => {
     expect(cancelled.length).toBe(1);
   });
 
+  test("fails the flow when the reducer throws from an async event", async () => {
+    let emit!: (event: TestEvent) => void;
+    const { options } = makeFlow({
+      register: (e) => {
+        emit = e;
+      },
+      reduce: (event) => {
+        if (event.type === "boom") {
+          throw new Error("reduce boom");
+        }
+        return { done: false };
+      }
+    });
+
+    const promise = runEventFlow(options);
+    queueMicrotask(() => emit({ type: "boom" }));
+    await expect(promise).rejects.toThrow("reduce boom");
+  });
+
   test("rejects when register throws and still clears the timer", async () => {
     const scheduled: Array<() => void> = [];
     const cancelled: unknown[] = [];

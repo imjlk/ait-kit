@@ -213,6 +213,18 @@ const ads = createReactNativeAds();
 export function consumerCheck(): string {
   return result.status === "dismissed" ? new SdkError("UNSUPPORTED", "check").code : "impossible";
 }
+
+// The /rn entry must share the root entry's SdkError constructor: without
+// the externalized self-import, independently bundled entries would create
+// two classes and this check would be false.
+export async function crossEntryInstanceofCheck(): Promise<boolean> {
+  try {
+    await ads.loadFullScreenAd("AD_GROUP_ID");
+    return false;
+  } catch (error) {
+    return error instanceof SdkError;
+  }
+}
 export { ads };
 `
       );
@@ -265,6 +277,29 @@ export { ads };
         ],
         fixtureDir
       );
+      // NodeNext consumers resolve the shipped declarations directly; the
+      // emitted d.ts must carry extension-safe specifiers.
+      run(
+        "npm",
+        [
+          "exec",
+          "--",
+          "tsc",
+          "--noEmit",
+          "--strict",
+          "--target",
+          "es2022",
+          "--module",
+          "nodenext",
+          "--moduleResolution",
+          "nodenext",
+          "consumer.ts"
+        ],
+        fixtureDir
+      );
+      // Execute the bundled consumer: the cross-entry instanceof check must
+      // hold at runtime against the installed tarball.
+      run(process.execPath, [join(fixtureDir, "consumer.js")], fixtureDir);
     }
     console.log(`Verified ${packedPackage.name}@${packedPackage.version}`);
   }

@@ -11,18 +11,10 @@ export interface LoadFullScreenAdParams {
   onError: (error: unknown) => void;
 }
 
-export interface FullScreenAdShowEvent {
-  type:
-    | "requested"
-    | "show"
-    | "impression"
-    | "clicked"
-    | "dismissed"
-    | "failedToShow"
-    | "userEarnedReward";
-  /** Present only on userEarnedReward. */
-  data?: { unitType: string; unitAmount: number };
-}
+/** Discriminated union per the provider contract: only userEarnedReward carries data. */
+export type FullScreenAdShowEvent =
+  | { type: "requested" | "show" | "impression" | "clicked" | "dismissed" | "failedToShow" }
+  | { type: "userEarnedReward"; data: { unitType: string; unitAmount: number } };
 
 export interface ShowFullScreenAdParams {
   options: { adGroupId: string };
