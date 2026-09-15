@@ -62,8 +62,17 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
     return result.module;
   };
 
-  const ensureSupported = (fn: { isSupported?: () => boolean }, label: string) => {
-    if (typeof fn.isSupported === "function" && !fn.isSupported()) {
+  /**
+   * Per-operation capability gate: an installed framework may expose some
+   * IAP functions but not others, so a missing function is UNSUPPORTED only
+   * when that specific operation is requested — never a blanket rejection.
+   */
+  const ensureOperation = (fn: unknown, label: string) => {
+    if (typeof fn !== "function") {
+      throw new SdkError("UNSUPPORTED", `the installed IAP SDK does not expose ${label}`);
+    }
+    const supported = fn as { isSupported?: () => boolean };
+    if (typeof supported.isSupported === "function" && !supported.isSupported()) {
       throw new SdkError("UNSUPPORTED", `${label} is not supported on this app version`);
     }
   };
@@ -71,13 +80,13 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
   return {
     async getProductItemList() {
       const platform = await load();
-      ensureSupported(platform.getProductItemList, "getProductItemList");
+      ensureOperation(platform.getProductItemList, "getProductItemList");
       return platform.getProductItemList();
     },
 
     purchaseOneTime(sku: string) {
       return purchaseWithDeadline(async (platform, remainingMs) => {
-        ensureSupported(platform.createOneTimePurchaseOrder, "one-time purchases");
+        ensureOperation(platform.createOneTimePurchaseOrder, "one-time purchases");
         return await runPurchaseFlow({
           platform,
           coordinator,
@@ -90,7 +99,7 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
 
     purchaseSubscription(sku: string, offerId?: string) {
       return purchaseWithDeadline(async (platform, remainingMs) => {
-        ensureSupported(platform.createSubscriptionPurchaseOrder, "subscription purchases");
+        ensureOperation(platform.createSubscriptionPurchaseOrder, "subscription purchases");
         return await runPurchaseFlow({
           platform,
           coordinator,
@@ -104,13 +113,13 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
 
     async getPendingOrders() {
       const platform = await load();
-      ensureSupported(platform.getPendingOrders, "getPendingOrders");
+      ensureOperation(platform.getPendingOrders, "getPendingOrders");
       return platform.getPendingOrders();
     },
 
     async recoverPendingOrder(order: IapPendingOrder): Promise<IapRecoveryResult> {
       const platform = await load();
-      ensureSupported(platform.completeProductGrant, "completeProductGrant");
+      ensureOperation(platform.completeProductGrant, "completeProductGrant");
       try {
         // Server grant confirmation first (deduped within this adapter's
         // scope); the completion notification follows only after it.
@@ -168,7 +177,9 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
     } finally {
       if (timer !== undefined) clearTimeout(timer);
     }
-    if (!platform) {
+    if (!platform || cancelled || Date.now() - startedAt >= purchaseTimeoutMs) {
+      // The loader may resolve as an overdue microtask before the timer
+      // callback runs; a fresh clock comparison is authoritative.
       return timedOut();
     }
     const remainingMs = Math.max(1, purchaseTimeoutMs - (Date.now() - startedAt));

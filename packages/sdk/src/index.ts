@@ -104,7 +104,7 @@ export type IapPurchaseResult =
   | { status: "canceled" }
   | { status: "failed"; code?: string; reason?: string }
   | { status: "grant_failed"; orderId: string; reason?: string }
-  | { status: "unknown"; orderId?: string; reason?: string };
+  | { status: "unknown"; orderId?: string; subscriptionId?: string; reason?: string };
 
 // Platform purchase-order parameter shapes (structural mirrors of the
 // official Domains API, shared by the /rn and /web connectors).

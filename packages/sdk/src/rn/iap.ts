@@ -38,19 +38,14 @@ function createDefaultRnIapLoader(): IapPlatformLoader {
         IAP?: Partial<IapPlatformSdk>;
       };
       const iap = framework.IAP;
-      if (
-        !iap ||
-        typeof iap.getProductItemList !== "function" ||
-        typeof iap.createOneTimePurchaseOrder !== "function" ||
-        typeof iap.createSubscriptionPurchaseOrder !== "function" ||
-        typeof iap.getPendingOrders !== "function" ||
-        typeof iap.completeProductGrant !== "function"
-      ) {
+      if (typeof iap !== "object" || iap === null) {
         return {
           available: false,
-          reason: "@apps-in-toss/framework does not expose the IAP APIs"
+          reason: "@apps-in-toss/framework does not expose an IAP domain"
         };
       }
+      // Per-operation capability is validated at each call site: an
+      // installed version may expose some IAP functions but not others.
       cached = iap as IapPlatformSdk;
       return { available: true, module: cached };
     } catch (error) {

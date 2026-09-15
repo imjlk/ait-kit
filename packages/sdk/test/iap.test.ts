@@ -279,20 +279,46 @@ describe("@ait-kit/sdk IAP adapters", () => {
     // One server call for both concurrent callbacks.
     expect(grants.calls).toEqual([{ orderId: "order-1" }]);
 
-    // A second flow reusing the same order resolves the grant immediately
-    // without another server call.
-    const second = iap.purchaseSubscription("SKU_SUB");
+    // A second flow reusing the same order AND target resolves the grant
+    // immediately without another server call.
+    const second = iap.purchaseOneTime("SKU_COINS");
     await Bun.sleep(1);
-    const sub = fake.purchases[1];
-    expect(sub.kind).toBe("subscription");
-    expect(sub.offerId).toBeUndefined();
-    expect(await sub.processProductGrant({ orderId: "order-1", subscriptionId: "sub-9" })).toBe(true);
-    sub.onEvent({ type: "success", data: successPayload("order-1") });
+    const reuse = fake.purchases[1];
+    expect(reuse.kind).toBe("one-time");
+    expect(await reuse.processProductGrant({ orderId: "order-1" })).toBe(true);
+    reuse.onEvent({ type: "success", data: successPayload("order-1") });
     await expect(second).resolves.toMatchObject({
       status: "completed",
-      orderId: "order-1",
-      subscriptionId: "sub-9"
+      orderId: "order-1"
     });
+    expect(grants.calls).toHaveLength(1);
+  });
+
+  test("rejects conflicting grant targets for one order", async () => {
+    const fake = fakeIapPlatform();
+    const grants = grantTracker();
+    const iap = createReactNativeIap({ framework: fake.platform, grant: grants.callback });
+
+    // Two flows for DIFFERENT products that both claim order-1.
+    const coins = iap.purchaseOneTime("SKU_COINS");
+    const gems = iap.purchaseOneTime("SKU_GEMS");
+    await Bun.sleep(1);
+    const coinsFlow = fake.purchases[0];
+    const gemsFlow = fake.purchases[1];
+
+    const legitimate = coinsFlow.processProductGrant({ orderId: "order-1" });
+    // Same order, different product: must not inherit the first grant.
+    const conflicting = gemsFlow.processProductGrant({ orderId: "order-1" });
+    await expect(conflicting).resolves.toBe(false);
+
+    coinsFlow.onEvent({ type: "success", data: successPayload("order-1") });
+    // The first flow's grant is the legitimate one and completes normally.
+    expect(await legitimate).toBe(true);
+    await expect(coins).resolves.toMatchObject({ status: "completed", orderId: "order-1" });
+    // The conflicting flow reports a failed grant, not a completed purchase.
+    gemsFlow.onError({ code: "PRODUCT_NOT_GRANTED_BY_PARTNER", message: "not granted" });
+    await expect(gems).resolves.toMatchObject({ status: "grant_failed", orderId: "order-1" });
+    // Only the first, legitimate target reached the server callback.
     expect(grants.calls).toHaveLength(1);
   });
 
@@ -439,6 +465,63 @@ describe("@ait-kit/sdk IAP adapters", () => {
       subscriptionId: "sub-1"
     });
     releaseGrant();
+  });
+
+  test("reports unknown when an SDK error follows a confirmed grant", async () => {
+    const fake = fakeIapPlatform();
+    const iap = createReactNativeIap({ framework: fake.platform, grant: async () => {} });
+
+    const promise = iap.purchaseOneTime("SKU_COINS");
+    await Bun.sleep(1);
+    const captured = fake.purchases[0];
+
+    // Grant confirmed, then the bridge errors before the success event.
+    expect(await captured.processProductGrant({ orderId: "order-1" })).toBe(true);
+    captured.onError({ code: "INTERNAL_ERROR", message: "bridge failed late" });
+
+    await expect(promise).resolves.toMatchObject({
+      status: "unknown",
+      orderId: "order-1",
+      reason: expect.stringContaining("verify server-side")
+    });
+  });
+
+  test("does not register a purchase when the loader blocks past the deadline", async () => {
+    const fake = fakeIapPlatform();
+    const iap = createReactNativeIap({
+      framework: async () => {
+        // Blocks the event loop past the 20ms deadline, then resolves.
+        const start = Date.now();
+        while (Date.now() - start < 30) {
+          /* spin */
+        }
+        return { available: true, module: fake.platform };
+      },
+      grant: async () => {},
+      purchaseTimeoutMs: 20
+    });
+
+    await expect(iap.purchaseOneTime("SKU_COINS")).resolves.toMatchObject({ status: "unknown" });
+    // The overdue load must not have registered a provider purchase.
+    expect(fake.purchases).toHaveLength(0);
+  });
+
+  test("validates IAP capability per operation, not per module", async () => {
+    const fake = fakeIapPlatform();
+    // Partial capability surface: subscriptions missing on this version.
+    const partial = {
+      ...fake.platform,
+      createSubscriptionPurchaseOrder: undefined
+    } as unknown as typeof fake.platform;
+    const iap = createReactNativeIap({ framework: partial, grant: async () => {} });
+
+    const { products } = await iap.getProductItemList();
+    expect(products[0].sku).toBe("SKU_COINS");
+
+    await expect(iap.purchaseSubscription("SKU_SUB")).rejects.toMatchObject({
+      code: "UNSUPPORTED",
+      message: expect.stringContaining("subscription purchases")
+    });
   });
 
   test("lists products and reports unsupported operations", async () => {

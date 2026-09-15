@@ -13,7 +13,15 @@
  *   // Resolve only after YOUR server verified the order and persisted the
  *   // grant (see the ait-kit server packages for verification flows).
  *   grant: async ({ orderId, sku }) => {
- *     await fetch("/api/iap/grant", { method: "POST", body: JSON.stringify({ orderId, sku }) });
+ *     const response = await fetch("/api/iap/grant", {
+ *       method: "POST",
+ *       body: JSON.stringify({ orderId, sku })
+ *     });
+ *     if (!response.ok) {
+ *       // Resolve-only-on-success is part of the contract: never report a
+ *       // grant your server did not verify and persist.
+ *       throw new Error(`grant request failed: HTTP ${response.status}`);
+ *     }
  *   }
  * });
  * const result = await iap.purchaseOneTime("SKU_100_COINS");

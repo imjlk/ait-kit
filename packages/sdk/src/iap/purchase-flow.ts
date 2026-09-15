@@ -157,6 +157,23 @@ export function runPurchaseFlow(options: PurchaseFlowOptions): Promise<IapPurcha
             return evaluate();
           }
           const code = toIapErrorCode(event.error);
+          if (confirmedOrderId !== undefined || observedOrderId !== undefined) {
+            // The server grant already ran (or is still running) for this
+            // order — an SDK error here is not a definitive failure. Report
+            // unknown so the caller verifies server-side instead of retrying
+            // into a second paid order.
+            return {
+              done: true,
+              result: {
+                status: "unknown",
+                orderId: confirmedOrderId ?? observedOrderId,
+                ...(confirmedSubscriptionId !== undefined || observedSubscriptionId !== undefined
+                  ? { subscriptionId: confirmedSubscriptionId ?? observedSubscriptionId }
+                  : {}),
+                reason: `SDK error after the grant started (${code ?? toIapErrorMessage(event.error)}); the order may already be granted — verify server-side and recover it via pending orders`
+              }
+            };
+          }
           if (code === "USER_CANCELED") {
             return { done: true, result: { status: "canceled" } };
           }

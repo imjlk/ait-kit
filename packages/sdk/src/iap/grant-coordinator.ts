@@ -17,31 +17,42 @@ import type { IapGrantTarget } from "./platform-contract.js";
  * mandatory server responsibility.
  */
 export class IapGrantCoordinator {
-  private readonly inFlight = new Map<string, Promise<void>>();
-  private readonly granted = new Set<string>();
+  private readonly inFlight = new Map<string, { target: IapGrantTarget; promise: Promise<void> }>();
+  private readonly granted = new Map<string, IapGrantTarget>();
 
   constructor(private readonly grant: (target: IapGrantTarget) => Promise<void>) {}
 
   /**
    * Runs (or joins) the grant for the target order. Resolves when the
    * consumer's callback resolves; rejects with the callback's error when it
-   * fails, leaving the order retryable.
+   * fails, leaving the order retryable. A duplicate call joins only when it
+   * describes the SAME target (sku and subscriptionId included): a
+   * conflicting duplicate rejects instead of silently inheriting another
+   * flow's grant.
    */
   run(target: IapGrantTarget): Promise<void> {
-    const existing = this.inFlight.get(target.orderId);
-    if (existing) {
-      return existing;
+    const conflict = (existing: IapGrantTarget) =>
+      new Error(
+        `conflicting grant target for order ${target.orderId}: already ${existing.sku !== target.sku ? `sku ${existing.sku}` : `subscriptionId ${existing.subscriptionId}`}, requested ${target.sku}`
+      );
+    const sameTarget = (existing: IapGrantTarget) =>
+      existing.sku === target.sku && existing.subscriptionId === target.subscriptionId;
+
+    const inFlight = this.inFlight.get(target.orderId);
+    if (inFlight) {
+      return sameTarget(inFlight.target) ? inFlight.promise : Promise.reject(conflict(inFlight.target));
     }
-    if (this.granted.has(target.orderId)) {
-      return Promise.resolve();
+    const granted = this.granted.get(target.orderId);
+    if (granted) {
+      return sameTarget(granted) ? Promise.resolve() : Promise.reject(conflict(granted));
     }
     const attempt = (async () => {
       await this.grant(target);
       // Only successful grants persist: the consumer's contract is to
       // resolve after the server verified the order and persisted the grant.
-      this.granted.add(target.orderId);
+      this.granted.set(target.orderId, target);
     })();
-    this.inFlight.set(target.orderId, attempt);
+    this.inFlight.set(target.orderId, { target, promise: attempt });
     attempt
       .catch(() => {
         // Failures are not cached; a later call retries the callback.
