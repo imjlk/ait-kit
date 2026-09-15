@@ -49,6 +49,62 @@ const DEFAULT_SHOW_TIMEOUT_MS = 60_000;
 const DEFAULT_LOAD_TIMEOUT_MS = 30_000;
 
 /**
+ * One overall budget shared by framework acquisition and the event flow.
+ * The loader races the configured budget, and whatever remains when the
+ * loader finishes becomes the event flow's own deadline — so the timeout
+ * the caller observes is enforced by the flow itself, whose subscription
+ * cleanup completes before the result settles (never by an outside race
+ * that abandons a still-listening flow).
+ */
+interface AdDeadline {
+  /** Remaining budget in ms, or undefined when no deadline is configured. */
+  remainingMs(): number | undefined;
+  /**
+   * Races a promise against the full budget. Resolves `undefined` when the
+   * budget runs out first (a later settlement of the raced promise is sunk
+   * and must never lead to a registration); rejections propagate.
+   */
+  race<T>(promise: Promise<T>): Promise<T | undefined>;
+}
+
+function createAdDeadline(timeoutMs: number, now: () => number = monotonicNow): AdDeadline {
+  if (!(timeoutMs > 0)) {
+    return { remainingMs: () => undefined, race: (promise) => promise };
+  }
+  const startedAt = now();
+  return {
+    remainingMs: () => timeoutMs - (now() - startedAt),
+    race: (promise) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve(undefined), timeoutMs);
+        // Attaching handlers also sinks a settlement that happens after the
+        // deadline already won; the no-op reject/resolve after settling is
+        // ignored by promise semantics.
+        promise.then(
+          (value) => {
+            clearTimeout(timer);
+            resolve(value);
+          },
+          (error) => {
+            clearTimeout(timer);
+            reject(error);
+          }
+        );
+      })
+  };
+}
+
+/**
+ * Monotonic elapsed time: a system wall-clock correction while the loader
+ * is pending must not shrink or stretch the remaining budget.
+ */
+function monotonicNow(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
+
+/**
  * React Native ad adapter over `@apps-in-toss/framework`. Load state is
  * tracked per ad type + ad unit, in-flight duplicate loads share one
  * request, and rewards come only from the provider's `userEarnedReward`
@@ -74,76 +130,31 @@ export function createReactNativeAds(options: ReactNativeAdsOptions = {}): React
       return existing.kind === "loaded" ? Promise.resolve() : existing.promise;
     }
 
-    const request = (async () => {
-      // The deadline covers framework acquisition as well as the provider
-      // load flow, and a timed-out task must not register with the provider
-      // afterwards: a retried load would otherwise race a late registration.
-      let cancelled = false;
-      const task = (async () => {
-        const framework = await loadFramework();
-        if (cancelled) {
-          throw new SdkError("AD_LOAD_TIMEOUT", "full-screen ad load timed out");
+    // Slot updates run inside this promise's settlement — before the
+    // caller's await/catch continuation — so a caller that immediately
+    // retries after a failure starts a fresh registration, and a caller
+    // that immediately shows after a success finds the slot loaded. The
+    // identity check keeps a stale task from touching a newer task's slot.
+    const promise = new Promise<void>((resolve, reject) => {
+      runLoad(adGroupId).then(
+        () => {
+          const current = slots.get(id);
+          if (current?.kind === "loading" && current.promise === promise) {
+            slots.set(id, { kind: "loaded" });
+          }
+          resolve();
+        },
+        (error: unknown) => {
+          const current = slots.get(id);
+          if (current?.kind === "loading" && current.promise === promise) {
+            slots.delete(id);
+          }
+          reject(error);
         }
-        if (
-          typeof framework.loadFullScreenAd.isSupported === "function" &&
-          !framework.loadFullScreenAd.isSupported()
-        ) {
-          throw new SdkError("UNSUPPORTED", "full-screen ads are not supported on this app version");
-        }
-        const outcome = await runEventFlow<LoadFlowEvent, void | SdkError>({
-          register: (emit) =>
-            framework.loadFullScreenAd({
-              options: { adGroupId },
-              onEvent: emit,
-              onError: (error) => emit({ type: "sdkError", error })
-            }),
-          reduce: (event) =>
-            event.type === "loaded"
-              ? { done: true, result: undefined }
-              : { done: true, result: loadFailure(event.error) },
-          onTimeout: () => new SdkError("AD_LOAD_TIMEOUT", "full-screen ad load timed out"),
-          timeoutMs: loadTimeoutMs
-        });
-        if (outcome instanceof SdkError) {
-          throw outcome;
-        }
-      })();
-      // If the deadline wins, the orphaned task rejects into this sink.
-      task.catch(() => {});
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const deadline = new Promise<never>((_, reject) => {
-        if (loadTimeoutMs > 0) {
-          timer = setTimeout(() => {
-            cancelled = true;
-            reject(new SdkError("AD_LOAD_TIMEOUT", "full-screen ad load timed out"));
-          }, loadTimeoutMs);
-        }
-      });
-      try {
-        return await Promise.race([task, deadline]);
-      } finally {
-        if (timer !== undefined) clearTimeout(timer);
-      }
-    })();
-
-    slots.set(id, { kind: "loading", promise: request });
-    request
-      .then(() => {
-        // Promote only when this exact request still owns the slot: a
-        // timed-out task resolving late must not mark a newer retry loaded.
-        const current = slots.get(id);
-        if (current?.kind === "loading" && current.promise === request) {
-          slots.set(id, { kind: "loaded" });
-        }
-      })
-      .catch(() => {
-        // A failed load frees the slot so the next attempt retries.
-        const current = slots.get(id);
-        if (current?.kind === "loading" && current.promise === request) {
-          slots.delete(id);
-        }
-      });
-    return request;
+      );
+    });
+    slots.set(id, { kind: "loading", promise });
+    return promise;
   };
 
   const show = (adGroupId: string): Promise<AdShowResult> => {
@@ -168,66 +179,93 @@ export function createReactNativeAds(options: ReactNativeAdsOptions = {}): React
     slots.delete(id);
     showing.add(id);
 
-    return (async () => {
-      // The deadline covers framework acquisition as well as the show flow:
-      // a stalled loader must release the showing slot instead of wedging
-      // the ad group forever, and a late-resolving loader must not register
-      // a show the deadline already ended.
-      let reward: AdReward | undefined;
-      let cancelled = false;
+    return (async (): Promise<AdShowResult> => {
       const timedOut = (): AdShowResult => ({ status: "failed", reason: "ad show flow timed out" });
       try {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const deadline = new Promise<AdShowResult>((resolve) => {
-          if (showTimeoutMs > 0) {
-            timer = setTimeout(() => {
-              cancelled = true;
-              resolve(timedOut());
-            }, showTimeoutMs);
-          }
-        });
-        const task = (async (): Promise<AdShowResult> => {
-          const framework = await loadFramework();
-          if (cancelled) {
-            return timedOut();
-          }
-          if (
-            typeof framework.showFullScreenAd.isSupported === "function" &&
-            !framework.showFullScreenAd.isSupported()
-          ) {
-            throw new SdkError("UNSUPPORTED", "full-screen ads are not supported on this app version");
-          }
-          return await runEventFlow<ShowFlowEvent, AdShowResult>({
-            register: (emit) =>
-              framework.showFullScreenAd({
-                options: { adGroupId },
-                onEvent: emit,
-                onError: (error) => emit({ type: "sdkError", error })
-              }),
-            reduce: (event) => {
-              if (event.type === "sdkError") {
-                const message = errorMessage(event.error);
-                return {
-                  done: true,
-                  result: { status: "failed", reason: `full-screen ad show failed: ${message}` }
-                };
-              }
-              return reduceShowEvent(event, () => reward, (value) => (reward = value));
-            },
-            onTimeout: timedOut,
-            timeoutMs: showTimeoutMs
-          });
-        })();
-        try {
-          return await Promise.race([task, deadline]);
-        } finally {
-          if (timer !== undefined) clearTimeout(timer);
+        // The whole show shares one budget: the loader races it, the event
+        // flow gets what remains, and the flow's own deadline produces the
+        // timeout result — its subscription cleanup completes before this
+        // promise settles, so `showing` is only released after the
+        // subscription is gone.
+        const deadline = createAdDeadline(showTimeoutMs);
+        const framework = await deadline.race(loadFramework());
+        if (!framework) {
+          return timedOut();
         }
+        if (
+          typeof framework.showFullScreenAd.isSupported === "function" &&
+          !framework.showFullScreenAd.isSupported()
+        ) {
+          throw new SdkError("UNSUPPORTED", "full-screen ads are not supported on this app version");
+        }
+        const remaining = deadline.remainingMs();
+        if (remaining !== undefined && remaining <= 0) {
+          return timedOut();
+        }
+        let reward: AdReward | undefined;
+        return await runEventFlow<ShowFlowEvent, AdShowResult>({
+          register: (emit) =>
+            framework.showFullScreenAd({
+              options: { adGroupId },
+              onEvent: emit,
+              onError: (error) => emit({ type: "sdkError", error })
+            }),
+          reduce: (event) => {
+            if (event.type === "sdkError") {
+              const message = errorMessage(event.error);
+              return {
+                done: true,
+                result: { status: "failed", reason: `full-screen ad show failed: ${message}` }
+              };
+            }
+            return reduceShowEvent(event, () => reward, (value) => (reward = value));
+          },
+          onTimeout: timedOut,
+          timeoutMs: remaining ?? 0
+        });
       } finally {
         showing.delete(id);
       }
     })();
   };
+
+  async function runLoad(adGroupId: string): Promise<void> {
+    // One deadline covers framework acquisition AND the provider flow. A
+    // loader that wins the race only just — or too late — leaves no budget
+    // for the provider registration, which is then skipped entirely.
+    const deadline = createAdDeadline(loadTimeoutMs);
+    const framework = await deadline.race(loadFramework());
+    if (!framework) {
+      throw new SdkError("AD_LOAD_TIMEOUT", "full-screen ad load timed out");
+    }
+    if (
+      typeof framework.loadFullScreenAd.isSupported === "function" &&
+      !framework.loadFullScreenAd.isSupported()
+    ) {
+      throw new SdkError("UNSUPPORTED", "full-screen ads are not supported on this app version");
+    }
+    const remaining = deadline.remainingMs();
+    if (remaining !== undefined && remaining <= 0) {
+      throw new SdkError("AD_LOAD_TIMEOUT", "full-screen ad load timed out");
+    }
+    const outcome = await runEventFlow<LoadFlowEvent, void | SdkError>({
+      register: (emit) =>
+        framework.loadFullScreenAd({
+          options: { adGroupId },
+          onEvent: emit,
+          onError: (error) => emit({ type: "sdkError", error })
+        }),
+      reduce: (event) =>
+        event.type === "loaded"
+          ? { done: true, result: undefined }
+          : { done: true, result: loadFailure(event.error) },
+      onTimeout: () => new SdkError("AD_LOAD_TIMEOUT", "full-screen ad load timed out"),
+      timeoutMs: remaining ?? 0
+    });
+    if (outcome instanceof SdkError) {
+      throw outcome;
+    }
+  }
 
   async function loadFramework(): Promise<FullScreenAdSupport> {
     const result = await loader();

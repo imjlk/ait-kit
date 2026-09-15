@@ -223,7 +223,16 @@ Behavior:
   are single-use: after a show flow ends (rewarded, dismissed, failed,
   timeout), a fresh load is required.
 - The whole show flow has one deadline (`showTimeoutMs`, default 60s);
-  `loadTimeoutMs` (default 30s) bounds loads.
+  `loadTimeoutMs` (default 30s) bounds loads. The deadline is a single
+  budget covering SDK loading AND the provider event flow: a loader that
+  consumes most of it leaves only the remainder for the event wait, and a
+  fully consumed budget never registers with the provider. Timeout results
+  come from the event flow's own deadline, so the subscription is cleaned
+  up before the timeout settles — no orphaned listener outlives the call.
+- Slot updates land inside the returned promise's settlement: a failed
+  load frees its slot before the caller's `catch` resumes (an immediate
+  retry starts a fresh registration), and a successful load is promoted
+  before the caller's `await` resumes (an immediate show works).
 - Missing or failed-to-import framework → `SdkError("SDK_UNAVAILABLE")`;
   unsupported app versions → `SdkError("UNSUPPORTED")`. Load failures are
   never permanently cached — a later call retries the import.
