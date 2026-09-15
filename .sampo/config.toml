@@ -23,6 +23,8 @@ release_date_timezone = "Asia/Seoul"
 # Options for package discovery and filtering.
 ignore_unpublished = true
 ignore = ["examples/*", "templates/*"]
+# The server API packages release in lockstep. @ait-kit/sdk is intentionally
+# outside this group: the frontend SDK versions on its own schedule.
 fixed = [[
   "npm/@ait-kit/api-core",
   "npm/@ait-kit/api-client",
