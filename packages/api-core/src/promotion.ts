@@ -184,12 +184,10 @@ export async function preparePromotionReward(
       upstreamStatus: keyResponse.status
     };
   }
-  const keyResultType = String(
-    readPathString(keyResponse.body, ["resultType", "success.resultType", "data.resultType"]) ?? ""
-  ).trim().toUpperCase();
+  const keyResultType = strictResultType(keyResponse.body);
   const rawKey = readPathValue(keyResponse.body, ["success.key", "key", "data.key"]);
   // Only an explicit SUCCESS envelope carrying a real string is provider
-  // evidence; coerced numeric or object values never become keys.
+  // evidence; coerced arrays, numerics, or objects never become keys.
   if (keyResultType !== "SUCCESS" || typeof rawKey !== "string" || !rawKey.trim()) {
     return {
       ok: false,

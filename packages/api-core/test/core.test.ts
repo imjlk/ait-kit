@@ -1114,7 +1114,8 @@ describe("@ait-kit/api-core", () => {
 
     test.each([
       ["no SUCCESS envelope", { key: "transaction-key" }, "was not a SUCCESS envelope"],
-      ["a coerced numeric key", { resultType: "SUCCESS", success: { key: 123 } }, "did not include a string key"]
+      ["a coerced numeric key", { resultType: "SUCCESS", success: { key: 123 } }, "did not include a string key"],
+      ["a coerced array resultType", { resultType: ["SUCCESS"], success: { key: "transaction-key" } }, "was not a SUCCESS envelope"]
     ] as const)(
       "prepare rejects a get-key response with %s",
       async (_label, body, reasonFragment) => {
