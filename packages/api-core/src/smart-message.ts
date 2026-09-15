@@ -1,5 +1,5 @@
 import { requestToss } from "./mtls-client";
-import { normalizeMessageRecipient, type MessageRecipient } from "./recipient";
+import { normalizeMessageRecipient, recipientIdentifierHeaders, type MessageRecipient } from "./recipient";
 import {
   clientError,
   httpStatusOk,
@@ -251,13 +251,7 @@ function stubSmartMessageResponse(body: unknown, msgCount: number, now: () => nu
  */
 function messageRecipientHeaders(body: Record<string, unknown>): Record<string, string> {
   const recipient = normalizeMessageRecipient(body, "INVALID_MESSAGE_RECIPIENT", "message recipient");
-  return recipientHeaders(recipient);
-}
-
-function recipientHeaders(recipient: MessageRecipient): Record<string, string> {
-  return recipient.kind === "user"
-    ? { "x-toss-user-key": String(recipient.userKey) }
-    : { "x-anon-key": recipient.anonKey };
+  return recipientIdentifierHeaders(recipient);
 }
 
 /**

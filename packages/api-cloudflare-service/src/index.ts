@@ -6,8 +6,14 @@ import type {
   HealthResponse,
   IapOrderStatusInput,
   IapOrderStatusResponse,
+  PromotionRewardExecuteInput,
+  PromotionRewardExecuteResponse,
   PromotionRewardGrantInput,
   PromotionRewardGrantResponse,
+  PromotionRewardPrepareInput,
+  PromotionRewardPrepareResponse,
+  PromotionRewardStatusInput,
+  PromotionRewardStatusResponse,
   RawMtlsRequest,
   RawMtlsResponse,
   SmartMessageBulkSendInput,
@@ -59,6 +65,18 @@ export class AppsInTossApiService extends WorkerEntrypoint<AppsInTossServiceEnv>
 
   async promotionRewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse> {
     return this.rpc().promotionRewardGrant(body);
+  }
+
+  async promotionPrepareReward(body: PromotionRewardPrepareInput): Promise<PromotionRewardPrepareResponse> {
+    return this.rpc().promotionPrepareReward(body);
+  }
+
+  async promotionExecuteReward(body: PromotionRewardExecuteInput): Promise<PromotionRewardExecuteResponse> {
+    return this.rpc().promotionExecuteReward(body);
+  }
+
+  async promotionRewardStatus(body: PromotionRewardStatusInput): Promise<PromotionRewardStatusResponse> {
+    return this.rpc().promotionRewardStatus(body);
   }
 
   async smartMessageSend(body: SmartMessageSendInput): Promise<SmartMessageResponse> {

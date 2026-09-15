@@ -233,6 +233,133 @@ export interface PromotionRewardGrantInput {
   providerTransactionKey?: string;
 }
 
+/**
+ * Input for the explicit promotion prepare step. The official get-key
+ * endpoint takes no body and no recipient header (mTLS identifies the app).
+ */
+export interface PromotionRewardPrepareInput {}
+
+/**
+ * Input for the explicit promotion execute step. `providerTransactionKey`
+ * (from prepare, stored by the consumer) is required — execute never issues
+ * a new key. The recipient fields follow the shared recipient contract:
+ * exactly one of `userKey`, `tossUserKey`, or `anonKey`.
+ */
+export interface PromotionRewardExecuteInput {
+  providerTransactionKey?: string;
+  promotionCode?: string;
+  amount?: number;
+  userKey?: string | number;
+  tossUserKey?: string | number;
+  anonKey?: string;
+}
+
+/**
+ * Input for the explicit promotion status step. Only reads the recorded
+ * outcome for an existing transaction key; never issues keys or executes
+ * grants.
+ */
+export interface PromotionRewardStatusInput {
+  providerTransactionKey?: string;
+  promotionCode?: string;
+  userKey?: string | number;
+  tossUserKey?: string | number;
+  anonKey?: string;
+}
+
+/**
+ * Result of the promotion prepare step (get-key only).
+ *
+ * `providerTransactionKey` is the encrypted key the provider requires for
+ * execute and status. Persist it before executing; key expiry is not
+ * documented by the official contract.
+ */
+export type PromotionRewardPrepareResponse =
+  | {
+      ok: true;
+      providerTransactionKey: string;
+      /** Synthetic stub-mode output; never present in forward mode. */
+      stub?: true;
+    }
+  | ProviderFailure;
+
+/**
+ * Result of the promotion execute step.
+ *
+ * - `SUBMITTED` — the provider accepted the grant request. This is not the
+ *   final grant state; confirm with the status step.
+ * - `UNKNOWN` (`ok: true`) — the request may or may not have been applied
+ *   (transport failure, unparseable response). The transaction key is always
+ *   preserved so the outcome can be resolved with the status step. Do not
+ *   treat this as a definite failure, and do not automatically re-execute:
+ *   the official contract documents error 4113 ("already granted/retracted")
+ *   for same-key re-execution but does not guarantee idempotency.
+ * - `ok: false` — the provider explicitly rejected this execute call (FAIL
+ *   envelope such as 4100/4105/4108/4109/4110/4112/4113/4114, or a 4xx
+ *   response; 5xx responses stay UNKNOWN).
+ *
+ * Passing a `providerRequestId`-style identifier does not by itself make an
+ * external grant idempotent.
+ */
+export type PromotionRewardExecuteResponse =
+  | {
+      ok: true;
+      result: "SUBMITTED";
+      providerTransactionKey: string;
+      stub?: true;
+    }
+  | {
+      ok: true;
+      result: "UNKNOWN";
+      providerTransactionKey: string;
+      failureReason?: string;
+      providerErrorCode?: string;
+      upstreamStatus?: number;
+      stub?: true;
+    }
+  | {
+      ok: false;
+      providerTransactionKey: string;
+      providerStatus: "FAILED";
+      failureReason: string;
+      providerErrorCode?: string;
+      upstreamStatus?: number;
+    };
+
+/**
+ * Observed status of a promotion transaction key.
+ *
+ * - `GRANTED` — explicit provider success (`SUCCESS`).
+ * - `PENDING` — accepted, still processing.
+ * - `FAILED` — explicit provider failure; the provider documents that the
+ *   used budget was rolled back.
+ * - `NOT_FOUND` — the provider answered error 4111: no grant record exists
+ *   for this key (never executed, or the record is gone).
+ * - `UNKNOWN` — no verdict: transport failure, non-2xx, or an unparseable
+ *   response. Never treat this as a definite failure.
+ *
+ * The official API supplies no grant timestamp, so responses carry
+ * `checkedAt` (observation time) and never a fabricated `grantedAt`.
+ */
+export type PromotionRewardStatus =
+  | "GRANTED"
+  | "PENDING"
+  | "FAILED"
+  | "NOT_FOUND"
+  | "UNKNOWN";
+
+export type PromotionRewardStatusResponse = {
+  ok: true;
+  status: PromotionRewardStatus;
+  providerTransactionKey: string;
+  checkedAt: number;
+  failureReason?: string;
+  providerErrorCode?: string;
+  upstreamStatus?: number;
+  /** Synthetic stub-mode output; never present in forward mode. */
+  stub?: true;
+};
+
 export type PromotionRewardGrantResponse =
   | {
       ok: true;
@@ -366,6 +493,9 @@ export interface AppsInTossApi {
   };
   promotion: {
     rewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
+    prepareReward(body: PromotionRewardPrepareInput): Promise<PromotionRewardPrepareResponse>;
+    executeReward(body: PromotionRewardExecuteInput): Promise<PromotionRewardExecuteResponse>;
+    rewardStatus(body: PromotionRewardStatusInput): Promise<PromotionRewardStatusResponse>;
   };
   smartMessage: {
     send(body: SmartMessageSendInput): Promise<SmartMessageResponse>;
@@ -382,6 +512,9 @@ export interface AppsInTossApiRpc {
   iapOrderStatus(body: IapOrderStatusInput): Promise<IapOrderStatusResponse>;
   verifyAnonKey(body: AnonKeyVerifyInput): Promise<AnonKeyVerifyResponse>;
   promotionRewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
+  promotionPrepareReward(body: PromotionRewardPrepareInput): Promise<PromotionRewardPrepareResponse>;
+  promotionExecuteReward(body: PromotionRewardExecuteInput): Promise<PromotionRewardExecuteResponse>;
+  promotionRewardStatus(body: PromotionRewardStatusInput): Promise<PromotionRewardStatusResponse>;
   smartMessageSend(body: SmartMessageSendInput): Promise<SmartMessageResponse>;
   smartMessageBulkSend(body: SmartMessageBulkSendInput): Promise<SmartMessageResponse>;
 }

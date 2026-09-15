@@ -98,6 +98,9 @@ describe("@ait-kit/api-client", () => {
     await client.iapOrderStatus({});
     await client.anonKeyVerify({ anonKey: "anon-hash" });
     await client.promotionRewardGrant({});
+    await client.promotionPrepareReward();
+    await client.promotionExecuteReward({});
+    await client.promotionRewardStatus({});
     await client.smartMessageBulkSend({ templateSetCode: "template", contextList: [] });
 
     expect(calls.map((call) => call.url.replace("http://proxy.local", ""))).toEqual([
@@ -107,6 +110,9 @@ describe("@ait-kit/api-client", () => {
       PROXY_ENDPOINTS.iapOrderStatus,
       PROXY_ENDPOINTS.anonKeyVerify,
       PROXY_ENDPOINTS.promotionRewardGrant,
+      PROXY_ENDPOINTS.promotionPrepareReward,
+      PROXY_ENDPOINTS.promotionExecuteReward,
+      PROXY_ENDPOINTS.promotionRewardStatus,
       PROXY_ENDPOINTS.smartMessageBulkSend
     ]);
     expect(PROXY_ENDPOINTS.genericMtlRequest).toBe(PROXY_ENDPOINTS.genericMtlsRequest);

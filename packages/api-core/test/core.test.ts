@@ -1070,4 +1070,683 @@ describe("@ait-kit/api-core", () => {
       stub: true
     });
   });
+
+  describe("promotion prepare / execute / status", () => {
+    function recordingApi(handler: MtlsClient["request"], options: Record<string, unknown> = {}) {
+      const paths: string[] = [];
+      const headers: Headers[] = [];
+      const bodies: unknown[] = [];
+      const mtlsClient: MtlsClient = {
+        async request(url, init) {
+          paths.push(new URL(url).pathname);
+          headers.push(new Headers(init.headers));
+          bodies.push(init.body === undefined ? undefined : JSON.parse(String(init.body)));
+          return handler(url, init);
+        }
+      };
+      return {
+        api: createAppsInTossApiRpc(
+          createAppsInTossApi({
+            mode: "forward",
+            upstreamBaseUrl: "https://partner.example",
+            mtlsClient,
+            ...options
+          })
+        ),
+        paths,
+        headers,
+        bodies
+      };
+    }
+
+    test("prepare only issues a transaction key", async () => {
+      const { api, paths, bodies } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+
+      const response = await api.promotionPrepareReward({});
+
+      expect(response).toEqual({ ok: true, providerTransactionKey: "transaction-key" });
+      expect(paths).toEqual([TOSS_ENDPOINTS.promotionGetKey]);
+      // The official get-key contract takes no request body.
+      expect(bodies[0]).toBeUndefined();
+    });
+
+    test.each([
+      ["no SUCCESS envelope", { key: "transaction-key" }, "was not a SUCCESS envelope"],
+      ["a coerced numeric key", { resultType: "SUCCESS", success: { key: 123 } }, "did not include a string key"],
+      ["a coerced array resultType", { resultType: ["SUCCESS"], success: { key: "transaction-key" } }, "was not a SUCCESS envelope"]
+    ] as const)(
+      "prepare rejects a get-key response with %s",
+      async (_label, body, reasonFragment) => {
+        const { api } = recordingApi(async () => Response.json(body));
+
+        const response = await api.promotionPrepareReward({});
+
+        expect(response).toMatchObject({
+          ok: false,
+          error: "INVALID_RESPONSE",
+          failureReason: expect.stringContaining(reasonFragment)
+        });
+      }
+    );
+
+    test.each([-1, 1.5, Infinity] as const)(
+      "rejects the configured tossPromotionAmount %s",
+      async (configured) => {
+        const { api, paths } = recordingApi(
+          async () => Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } }),
+          { tossPromotionAmount: configured }
+        );
+
+        await expect(
+          api.promotionExecuteReward({
+            providerTransactionKey: "transaction-key",
+            promotionCode: "promo",
+            tossUserKey: "user"
+          })
+        ).rejects.toMatchObject({ code: "INVALID_PROMOTION_AMOUNT", status: 400 });
+        expect(paths).toEqual([]);
+      }
+    );
+
+    test("rejects a whitespace-only configured tossPromotionCode", async () => {
+      const { api, paths } = recordingApi(
+        async () => Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } }),
+        { tossPromotionCode: "   " }
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          amount: 1000,
+          tossUserKey: "user"
+        })
+      ).rejects.toMatchObject({ code: "INVALID_PROMOTION_CODE", status: 400 });
+      expect(paths).toEqual([]);
+    });
+
+    test("propagates invalid upstream URL configuration before dispatch", async () => {
+      const api = createAppsInTossApiRpc(
+        createAppsInTossApi({
+          mode: "forward",
+          upstreamBaseUrl: "not a url",
+          mtlsClient: {
+            async request() {
+              throw new Error("requests must not be dispatched with a broken upstream URL");
+            }
+          }
+        })
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          amount: 1000,
+          tossUserKey: "user"
+        })
+      ).rejects.toThrow(TypeError);
+      await expect(
+        api.promotionRewardStatus({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          tossUserKey: "user"
+        })
+      ).rejects.toThrow(TypeError);
+    });
+
+    test("execute requires a key and never issues one", async () => {
+      const missing = createAppsInTossApiRpc(createAppsInTossApi({ mode: "forward" }));
+      await expect(
+        missing.promotionExecuteReward({
+          promotionCode: "promo",
+          amount: 1000,
+          tossUserKey: "user"
+        } as never)
+      ).rejects.toMatchObject({ code: "MISSING_TRANSACTION_KEY", status: 400 });
+
+      const { api, paths, headers, bodies } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+      const response = await api.promotionExecuteReward({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        amount: 1000,
+        tossUserKey: "user"
+      });
+
+      expect(response).toEqual({ ok: true, result: "SUBMITTED", providerTransactionKey: "transaction-key" });
+      expect(paths).toEqual([TOSS_ENDPOINTS.promotionExecute]);
+      expect(headers[0].get("x-toss-user-key")).toBe("user");
+      expect(bodies[0]).toEqual({ promotionCode: "promo", key: "transaction-key", amount: 1000 });
+    });
+
+    test("execute applies the recipient contract for anonymous users", async () => {
+      const { api, headers } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+
+      await api.promotionExecuteReward({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        amount: 1000,
+        anonKey: "anon:stored-hash"
+      });
+
+      expect(headers[0].get("x-anon-key")).toBe("anon:stored-hash");
+      expect(headers[0].get("x-toss-user-key")).toBeNull();
+    });
+
+    test("status performs zero key-issuing and zero execute calls", async () => {
+      const { api, paths, headers } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: "SUCCESS" })
+      );
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({
+        ok: true,
+        status: "GRANTED",
+        providerTransactionKey: "transaction-key"
+      });
+      expect(typeof (response as { checkedAt: number }).checkedAt).toBe("number");
+      expect(response).not.toHaveProperty("grantedAt");
+      expect(paths).toEqual([TOSS_ENDPOINTS.promotionResult]);
+      expect(headers[0].get("x-toss-user-key")).toBe("user");
+    });
+
+    test.each([
+      ["PENDING", "PENDING"],
+      ["FAILED", "FAILED"]
+    ] as const)("maps the provider status %s to %s", async (provider, status) => {
+      const { api } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: provider })
+      );
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({ ok: true, status, providerTransactionKey: "transaction-key" });
+    });
+
+    test("maps error 4111 to NOT_FOUND", async () => {
+      const { api } = recordingApi(async () =>
+        Response.json({
+          resultType: "FAIL",
+          error: { errorCode: "4111", reason: "지급 내역을 찾을 수 없어요." }
+        })
+      );
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({
+        ok: true,
+        status: "NOT_FOUND",
+        providerTransactionKey: "transaction-key",
+        providerErrorCode: "4111"
+      });
+    });
+
+    test("treats an unrecognized status enum as UNKNOWN, not FAILED", async () => {
+      const { api } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: "SOMETHING_ELSE" })
+      );
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({
+        ok: true,
+        status: "UNKNOWN",
+        providerTransactionKey: "transaction-key"
+      });
+    });
+
+    test.each(["DONE", "COMPLETED", "SUCCEEDED", "GRANTED"] as const)(
+      "treats the undocumented status alias %s as UNKNOWN",
+      async (alias) => {
+        const { api } = recordingApi(async () =>
+          Response.json({ resultType: "SUCCESS", success: alias })
+        );
+
+        const response = await api.promotionRewardStatus({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          tossUserKey: "user"
+        });
+
+        expect(response).toMatchObject({ ok: true, status: "UNKNOWN" });
+      }
+    );
+
+    test.each([
+      ["an array status", { resultType: "SUCCESS", success: { status: ["SUCCESS"] } }],
+      ["an object status", { resultType: "SUCCESS", success: { status: { code: "SUCCESS" } } }],
+      ["an array resultType", { resultType: ["SUCCESS"], success: "SUCCESS" }]
+    ] as const)("treats coerced evidence (%s) as UNKNOWN", async (_label, body) => {
+      const { api } = recordingApi(async () => Response.json(body));
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({ ok: true, status: "UNKNOWN" });
+    });
+
+    test("treats a FAIL envelope with a malformed error code as UNKNOWN", async () => {
+      const { api } = recordingApi(async () =>
+        Response.json({ resultType: "FAIL", error: { errorCode: {}, reason: "malformed" } })
+      );
+
+      const response = await api.promotionExecuteReward({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        amount: 1000,
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({ ok: true, result: "UNKNOWN" });
+      expect(response).not.toHaveProperty("providerErrorCode");
+    });
+
+    test.each([
+      ["no resultType", { ok: false, error: { errorCode: "4111", reason: "x" } }],
+      ["an ERROR resultType", { resultType: "ERROR", error: { errorCode: "4111", reason: "x" } }],
+      ["an array errorCode", { resultType: "FAIL", error: { errorCode: ["4111"], reason: "x" } }]
+    ] as const)("keeps 4111 with %s as UNKNOWN, not NOT_FOUND", async (_label, body) => {
+      const { api } = recordingApi(async () => Response.json(body));
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({ ok: true, status: "UNKNOWN" });
+    });
+
+    test("keeps a 5xx response carrying error 4111 as UNKNOWN", async () => {
+      const { api } = recordingApi(async () =>
+        Response.json(
+          { resultType: "FAIL", error: { errorCode: "4111", reason: "stale replica" } },
+          { status: 503 }
+        )
+      );
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({
+        ok: true,
+        status: "UNKNOWN",
+        providerErrorCode: "4111",
+        upstreamStatus: 503
+      });
+    });
+
+    test.each([
+      ["no resultType", { success: "SUCCESS" }],
+      ["an unrecognized resultType", { resultType: "WEIRD", success: "SUCCESS" }]
+    ] as const)("keeps a 2xx status payload with %s as UNKNOWN", async (_label, body) => {
+      const { api } = recordingApi(async () => Response.json(body));
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({ ok: true, status: "UNKNOWN" });
+    });
+
+    test("propagates factory failures that occur before dispatch", async () => {
+      const api = createAppsInTossApiRpc(
+        createAppsInTossApi({
+          mode: "forward",
+          upstreamBaseUrl: "https://partner.example",
+          appId: "app-id",
+          mtlsClientFactory: {
+            forApp: async () => {
+              throw new Error("factory boom");
+            }
+          }
+        })
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          amount: 1000,
+          tossUserKey: "user"
+        })
+      ).rejects.toThrow("factory boom");
+      await expect(
+        api.promotionRewardStatus({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          tossUserKey: "user"
+        })
+      ).rejects.toThrow("factory boom");
+    });
+
+    test.each([
+      ["a numeric promotion code", 123],
+      ["an object promotion code", { code: "promo" }]
+    ] as const)("rejects %s instead of coercing it", async (_label, promotionCode) => {
+      const { api, paths } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          promotionCode,
+          amount: 1000,
+          tossUserKey: "user"
+        } as never)
+      ).rejects.toMatchObject({ code: "INVALID_PROMOTION_CODE", status: 400 });
+      expect(paths).toEqual([]);
+    });
+
+    test.each([
+      ["a numeric transaction key", 123],
+      ["an object transaction key", { key: "k" }]
+    ] as const)("rejects %s instead of coercing it", async (_label, providerTransactionKey) => {
+      const { api, paths } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey,
+          promotionCode: "promo",
+          amount: 1000,
+          tossUserKey: "user"
+        } as never)
+      ).rejects.toMatchObject({ code: "INVALID_TRANSACTION_KEY", status: 400 });
+      await expect(
+        api.promotionRewardStatus({
+          providerTransactionKey,
+          promotionCode: "promo",
+          tossUserKey: "user"
+        } as never)
+      ).rejects.toMatchObject({ code: "INVALID_TRANSACTION_KEY", status: 400 });
+      expect(paths).toEqual([]);
+    });
+
+    test.each([
+      ["a string amount", "1000"],
+      ["a boolean amount", true]
+    ] as const)("rejects %s instead of coercing it", async (_label, amount) => {
+      const { api, paths } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          amount,
+          tossUserKey: "user"
+        } as never)
+      ).rejects.toMatchObject({ code: "INVALID_PROMOTION_AMOUNT", status: 400 });
+      expect(paths).toEqual([]);
+    });
+
+    test("rejects an explicitly invalid amount instead of applying the configured default", async () => {
+      const { api, paths } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } }),
+        { tossPromotionAmount: 500 }
+      );
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          amount: 0,
+          tossUserKey: "user"
+        })
+      ).rejects.toMatchObject({ code: "INVALID_PROMOTION_AMOUNT", status: 400 });
+      expect(paths).toEqual([]);
+    });
+
+    test("rethrows pre-dispatch configuration errors instead of reporting UNKNOWN", async () => {
+      const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "forward" }));
+
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          amount: 1000,
+          tossUserKey: "user"
+        })
+      ).rejects.toMatchObject({ code: "MISSING_MTLS_CLIENT" });
+      await expect(
+        api.promotionRewardStatus({
+          providerTransactionKey: "transaction-key",
+          promotionCode: "promo",
+          tossUserKey: "user"
+        })
+      ).rejects.toMatchObject({ code: "MISSING_MTLS_CLIENT" });
+    });
+
+    test("keeps the key and reports UNKNOWN when the status lookup fails", async () => {
+      const { api } = recordingApi(async () =>
+        Response.json({ message: "result service unavailable" }, { status: 503 })
+      );
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({
+        ok: true,
+        status: "UNKNOWN",
+        providerTransactionKey: "transaction-key",
+        upstreamStatus: 503
+      });
+    });
+
+    test("keeps the key and reports UNKNOWN when the status transport rejects", async () => {
+      const { api } = recordingApi(async () => {
+        throw new Error("connection reset");
+      });
+
+      const response = await api.promotionRewardStatus({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({
+        ok: true,
+        status: "UNKNOWN",
+        providerTransactionKey: "transaction-key",
+        failureReason: "promotion status request failed: connection reset"
+      });
+    });
+
+    test("keeps the key and reports UNKNOWN when an execute response is lost", async () => {
+      const { api } = recordingApi(async () => {
+        throw new Error("gateway timeout");
+      });
+
+      const response = await api.promotionExecuteReward({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        amount: 1000,
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({
+        ok: true,
+        result: "UNKNOWN",
+        providerTransactionKey: "transaction-key",
+        failureReason: "promotion execute request failed: gateway timeout"
+      });
+    });
+
+    test("treats an execute 5xx as UNKNOWN, not a definite failure", async () => {
+      const { api } = recordingApi(async () =>
+        Response.json({ message: "execute service unavailable" }, { status: 503 })
+      );
+
+      const response = await api.promotionExecuteReward({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        amount: 1000,
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({
+        ok: true,
+        result: "UNKNOWN",
+        providerTransactionKey: "transaction-key",
+        upstreamStatus: 503
+      });
+    });
+
+    test("surfaces an explicit execute rejection with the key preserved", async () => {
+      const { api } = recordingApi(async () =>
+        Response.json({
+          resultType: "FAIL",
+          error: { errorCode: "4112", reason: "프로모션 예산이 부족해요." }
+        })
+      );
+
+      const response = await api.promotionExecuteReward({
+        providerTransactionKey: "transaction-key",
+        promotionCode: "promo",
+        amount: 1000,
+        tossUserKey: "user"
+      });
+
+      expect(response).toMatchObject({
+        ok: false,
+        providerStatus: "FAILED",
+        providerTransactionKey: "transaction-key",
+        providerErrorCode: "4112"
+      });
+    });
+
+    test.each([
+      ["forward", "MISSING_TRANSACTION_KEY"],
+      ["stub", "MISSING_TRANSACTION_KEY"]
+    ] as const)(
+      "validates execute inputs identically in %s mode",
+      async (mode, code) => {
+        const api = createAppsInTossApiRpc(
+          createAppsInTossApi({
+            mode,
+            upstreamBaseUrl: "https://partner.example",
+            mtlsClient: {
+              async request() {
+                throw new Error("invalid promotion input must not reach the transport");
+              }
+            }
+          })
+        );
+
+        await expect(
+          api.promotionExecuteReward({ promotionCode: "promo", amount: 1000, tossUserKey: "user" } as never)
+        ).rejects.toMatchObject({ code, status: 400 });
+        await expect(
+          api.promotionExecuteReward({ providerTransactionKey: "key", amount: 1000, tossUserKey: "user" } as never)
+        ).rejects.toMatchObject({ code: "MISSING_PROMOTION_CODE", status: 400 });
+        await expect(
+          api.promotionExecuteReward({ providerTransactionKey: "key", promotionCode: "promo", tossUserKey: "user" } as never)
+        ).rejects.toMatchObject({ code: "MISSING_PROMOTION_AMOUNT", status: 400 });
+        await expect(
+          api.promotionExecuteReward({
+            providerTransactionKey: "key",
+            promotionCode: "promo",
+            amount: 1000,
+            userKey: "u",
+            anonKey: "a"
+          } as never)
+        ).rejects.toMatchObject({ code: "INVALID_PROMOTION_RECIPIENT", status: 400 });
+      }
+    );
+
+    test("validates status inputs before any request", async () => {
+      const api = createAppsInTossApiRpc(
+        createAppsInTossApi({
+          mode: "forward",
+          upstreamBaseUrl: "https://partner.example",
+          mtlsClient: {
+            async request() {
+              throw new Error("invalid promotion input must not reach the transport");
+            }
+          }
+        })
+      );
+
+      await expect(api.promotionRewardStatus({ promotionCode: "promo" } as never)).rejects.toMatchObject({
+        code: "MISSING_TRANSACTION_KEY",
+        status: 400
+      });
+      await expect(
+        api.promotionRewardStatus({ providerTransactionKey: "key", tossUserKey: "user" } as never)
+      ).rejects.toMatchObject({ code: "MISSING_PROMOTION_CODE", status: 400 });
+    });
+
+    test("stub mode never claims a granted promotion", async () => {
+      const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub", now: () => 123_456 }));
+
+      await expect(api.promotionPrepareReward({})).resolves.toEqual({
+        ok: true,
+        providerTransactionKey: "stub-promotion-transaction-key",
+        stub: true
+      });
+      await expect(
+        api.promotionExecuteReward({
+          providerTransactionKey: "stub-promotion-transaction-key",
+          promotionCode: "promo",
+          amount: 1000,
+          tossUserKey: "user"
+        })
+      ).resolves.toEqual({
+        ok: true,
+        result: "SUBMITTED",
+        providerTransactionKey: "stub-promotion-transaction-key",
+        stub: true
+      });
+      await expect(
+        api.promotionRewardStatus({
+          providerTransactionKey: "stub-promotion-transaction-key",
+          promotionCode: "promo",
+          tossUserKey: "user"
+        })
+      ).resolves.toEqual({
+        ok: true,
+        status: "PENDING",
+        providerTransactionKey: "stub-promotion-transaction-key",
+        checkedAt: 123_456,
+        stub: true
+      });
+    });
+  });
 });

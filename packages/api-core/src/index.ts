@@ -2,7 +2,12 @@ import { verifyAnonKey } from "./anon-key";
 import { getIapOrderStatus } from "./iap";
 import { completeTossLogin, removeTossLoginByUserKey } from "./login";
 import { rawMtlsRequest } from "./mtls-client";
-import { grantPromotionReward } from "./promotion";
+import {
+  executePromotionReward,
+  grantPromotionReward,
+  preparePromotionReward,
+  statusPromotionReward
+} from "./promotion";
 import { bulkSendSmartMessage, sendSmartMessage } from "./smart-message";
 import { normalizeCoreOptions, stringOrUndefined } from "./toss-envelope";
 import type {
@@ -42,7 +47,10 @@ export function createAppsInTossApi(options: AppsInTossCoreOptions = {}): AppsIn
       verifyAnonKey: (body) => verifyAnonKey(body, coreOptions)
     },
     promotion: {
-      rewardGrant: (body) => grantPromotionReward(body, coreOptions)
+      rewardGrant: (body) => grantPromotionReward(body, coreOptions),
+      prepareReward: (body) => preparePromotionReward(body, coreOptions),
+      executeReward: (body) => executePromotionReward(body, coreOptions),
+      rewardStatus: (body) => statusPromotionReward(body, coreOptions)
     },
     smartMessage: {
       send: (body) => sendSmartMessage(body, coreOptions),
@@ -61,6 +69,9 @@ export function createAppsInTossApiRpc(api: AppsInTossApi): AppsInTossApiRpc {
     iapOrderStatus: (body) => api.iap.orderStatus(body),
     verifyAnonKey: (body) => api.users.verifyAnonKey(body),
     promotionRewardGrant: (body) => api.promotion.rewardGrant(body),
+    promotionPrepareReward: (body) => api.promotion.prepareReward(body),
+    promotionExecuteReward: (body) => api.promotion.executeReward(body),
+    promotionRewardStatus: (body) => api.promotion.rewardStatus(body),
     smartMessageSend: (body) => api.smartMessage.send(body),
     smartMessageBulkSend: (body) => api.smartMessage.bulkSend(body)
   };

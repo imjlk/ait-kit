@@ -80,5 +80,91 @@ value. Applications that decorate stored identifiers with their own prefix
 calling; the kit transmits keys byte-for-byte and never adds or removes
 prefixes in either direction.
 
+## Recoverable promotion grants
+
+`promotionRewardGrant` (legacy) chains key issuance, execution, and a result
+lookup in one call. The explicit three-step flow decouples them so your
+database sits between the phases:
+
+```ts
+// 1. Issue a transaction key.
+const prepared = await tossApi.promotionPrepareReward({});
+if (!prepared.ok) throw new Error(prepared.failureReason);
+
+// 2. Persist the key BEFORE executing. Bind it to the owner, the recipient
+//    identifier you will execute with, the promotion code, the amount, and
+//    your own request id — see the storage guidance below.
+const recipientKey = "anon:stored-hash"; // your app-prefixed storage form
+await db.promotionGrants.insert({
+  providerTransactionKey: prepared.providerTransactionKey,
+  ownerId: session.userId,          // who initiated the grant
+  recipientKey,                     // exactly what you will send
+  promotionCode: "WELCOME_EVENT",
+  amount: 1000,
+  requestId: request.id,            // your idempotency/tracing id
+  stage: "PREPARED"
+});
+
+// 3. Execute the grant with the stored key. Strip your own storage prefix
+//    first — the kit transmits identifiers byte-for-byte.
+const executed = await tossApi.promotionExecuteReward({
+  providerTransactionKey: prepared.providerTransactionKey,
+  promotionCode: "WELCOME_EVENT",
+  amount: 1000,
+  anonKey: recipientKey.replace(/^anon:/, "") // or userKey / tossUserKey
+});
+
+// 4. Confirm the outcome. If step 3 crashed or returned UNKNOWN, re-run
+//    only this step — status issues no keys and executes no grants.
+const status = await tossApi.promotionRewardStatus({
+  providerTransactionKey: prepared.providerTransactionKey,
+  promotionCode: "WELCOME_EVENT",
+  anonKey: recipientKey.replace(/^anon:/, "")
+});
+// status.status: "GRANTED" | "PENDING" | "FAILED" | "NOT_FOUND" | "UNKNOWN"
+```
+
+### Outcome semantics
+
+- `SUBMITTED` (execute) means the provider accepted the request — confirm
+  with the status step; it is not the final grant state.
+- `UNKNOWN` means no verdict was obtained: transport failures, 5xx, or
+  unparseable responses. The transaction key is always preserved so you can
+  resolve the outcome with a status query. **Never** treat `UNKNOWN` as a
+  definite failure, and do not automatically re-execute: the provider
+  rejects same-key re-execution with error 4113 ("already granted/
+  retracted"), but the official contract does not document idempotency for
+  repeated execution.
+- Explicit failures (execute `ok: false`, status `"FAILED"`) come only from
+  a provider verdict — FAIL envelopes with error codes, 4xx, or the
+  documented `FAILED` status (the provider rolls back the used budget).
+- `"NOT_FOUND"` is the documented error 4111: no grant record exists for
+  the key (never executed, or the record is gone).
+- The official API supplies **no grant timestamp and no documented key
+  expiry**. Status responses report `checkedAt` (when you observed the
+  status) and never fabricate a `grantedAt` from your request time.
+- Passing a request identifier of your own does **not** make an external
+  grant idempotent — treat it as tracing metadata only.
+
+### Consumer responsibilities
+
+The provider only deduplicates by transaction key. Your application owns:
+
+- **Storage**: save the key bound to the owner, recipient identifier,
+  promotion code, amount, and your request id before executing, so a lost
+  execute response can always be resolved against what you intended to do.
+- **Ownership checks**: verify the caller owns the stored grant before
+  executing or polling it.
+- **Concurrency control**: prevent two executes for the same key from
+  racing (the legacy 4113 rejection is the provider's backstop, not a
+  contract).
+- **Ledger updates**: credit balances only on `GRANTED`, and design
+  `UNKNOWN` handling (retry the status query with backoff) rather than
+  guessing.
+
+The legacy `promotionRewardGrant` keeps its original behavior, including
+treating a caller-supplied `providerTransactionKey` as a result lookup
+only — passing an existing key never triggers an execute through that API.
+
 See the [AIT Kit repository](https://github.com/imjlk/ait-kit) for supported APIs, Cloudflare
 bindings, examples, and release notes.
