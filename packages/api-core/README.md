@@ -94,22 +94,24 @@ if (!prepared.ok) throw new Error(prepared.failureReason);
 // 2. Persist the key BEFORE executing. Bind it to the owner, the recipient
 //    identifier you will execute with, the promotion code, the amount, and
 //    your own request id — see the storage guidance below.
+const recipientKey = "anon:stored-hash"; // your app-prefixed storage form
 await db.promotionGrants.insert({
   providerTransactionKey: prepared.providerTransactionKey,
   ownerId: session.userId,          // who initiated the grant
-  recipientKey: "anon:stored-hash", // exact identifier you will send
+  recipientKey,                     // exactly what you will send
   promotionCode: "WELCOME_EVENT",
   amount: 1000,
   requestId: request.id,            // your idempotency/tracing id
   stage: "PREPARED"
 });
 
-// 3. Execute the grant with the stored key.
+// 3. Execute the grant with the stored key. Strip your own storage prefix
+//    first — the kit transmits identifiers byte-for-byte.
 const executed = await tossApi.promotionExecuteReward({
   providerTransactionKey: prepared.providerTransactionKey,
   promotionCode: "WELCOME_EVENT",
   amount: 1000,
-  anonKey: "anon:stored-hash"       // or userKey / tossUserKey
+  anonKey: recipientKey.replace(/^anon:/, "") // or userKey / tossUserKey
 });
 
 // 4. Confirm the outcome. If step 3 crashed or returned UNKNOWN, re-run
@@ -117,7 +119,7 @@ const executed = await tossApi.promotionExecuteReward({
 const status = await tossApi.promotionRewardStatus({
   providerTransactionKey: prepared.providerTransactionKey,
   promotionCode: "WELCOME_EVENT",
-  anonKey: "anon:stored-hash"
+  anonKey: recipientKey.replace(/^anon:/, "")
 });
 // status.status: "GRANTED" | "PENDING" | "FAILED" | "NOT_FOUND" | "UNKNOWN"
 ```

@@ -1,6 +1,7 @@
 import { requestToss } from "./mtls-client";
 import { normalizeMessageRecipient, recipientIdentifierHeaders } from "./recipient";
 import {
+  AppsInTossApiError,
   clientError,
   httpStatusOk,
   isUpstreamFailure,
@@ -170,7 +171,8 @@ export async function preparePromotionReward(
     return { ok: true, providerTransactionKey: "stub-promotion-transaction-key", stub: true };
   }
   const keyResponse = await requestToss(
-    { method: "POST", path: TOSS_ENDPOINTS.promotionGetKey, body: {} },
+    // The official get-key contract takes no request body.
+    { method: "POST", path: TOSS_ENDPOINTS.promotionGetKey },
     options
   );
   if (!httpStatusOk(keyResponse.status) || isUpstreamFailure(keyResponse.body)) {
@@ -211,17 +213,8 @@ export async function executePromotionReward(
   if (!providerTransactionKey) {
     throw clientError("MISSING_TRANSACTION_KEY", "providerTransactionKey is required to execute a promotion");
   }
-  const promotionCode = stringOrUndefined(request.promotionCode) || options.tossPromotionCode;
-  if (!promotionCode) {
-    throw clientError("MISSING_PROMOTION_CODE", "promotionCode is required to execute a promotion");
-  }
-  const amount =
-    positiveIntegerOrUndefined(request.amount) ||
-    positiveIntegerOrUndefined(request.promotionAmount) ||
-    options.tossPromotionAmount;
-  if (!amount) {
-    throw clientError("MISSING_PROMOTION_AMOUNT", "amount is required to execute a promotion");
-  }
+  const promotionCode = resolvePromotionCode(request, options, "execute");
+  const amount = resolvePromotionAmount(request, options, "execute");
   const recipient = normalizeMessageRecipient(request, "INVALID_PROMOTION_RECIPIENT", "promotion recipient");
 
   if (options.mode !== "forward") {
@@ -240,8 +233,11 @@ export async function executePromotionReward(
       options
     );
   } catch (error) {
-    // The grant request may have reached the provider; surface the key and
-    // the failed step without claiming either outcome.
+    // Kit-generated errors (missing mTLS client, invalid path) are thrown
+    // before anything is dispatched — rethrow them instead of reporting an
+    // outcome the request never had. Only genuine transport rejections are
+    // uncertain: the grant request may have reached the provider.
+    if (error instanceof AppsInTossApiError) throw error;
     const message = error instanceof Error ? error.message : String(error);
     return {
       ok: true,
@@ -319,10 +315,7 @@ export async function statusPromotionReward(
   if (!providerTransactionKey) {
     throw clientError("MISSING_TRANSACTION_KEY", "providerTransactionKey is required to check promotion status");
   }
-  const promotionCode = stringOrUndefined(request.promotionCode) || options.tossPromotionCode;
-  if (!promotionCode) {
-    throw clientError("MISSING_PROMOTION_CODE", "promotionCode is required to check promotion status");
-  }
+  const promotionCode = resolvePromotionCode(request, options, "check promotion status");
   const recipient = normalizeMessageRecipient(request, "INVALID_PROMOTION_RECIPIENT", "promotion recipient");
 
   if (options.mode !== "forward") {
@@ -348,6 +341,9 @@ export async function statusPromotionReward(
       options
     );
   } catch (error) {
+    // Kit-generated pre-dispatch errors (configuration, path) must surface,
+    // not masquerade as an unverifiable outcome.
+    if (error instanceof AppsInTossApiError) throw error;
     const message = error instanceof Error ? error.message : String(error);
     return unknownStatus(providerTransactionKey, options, {
       failureReason: `promotion status request failed: ${message}`
@@ -356,7 +352,9 @@ export async function statusPromotionReward(
 
   if (!httpStatusOk(resultResponse.status) || isUpstreamFailure(resultResponse.body)) {
     const providerErrorCode = upstreamFailureCode(resultResponse.body);
-    if (providerErrorCode === "4111") {
+    // Map 4111 only for an expected provider verdict (2xx + FAIL envelope):
+    // a 5xx that happens to carry the code has an uncertain outcome.
+    if (httpStatusOk(resultResponse.status) && isUpstreamFailure(resultResponse.body) && providerErrorCode === "4111") {
       // Documented meaning: no grant record exists for this key.
       return {
         ok: true,
@@ -396,9 +394,10 @@ export async function statusPromotionReward(
 }
 
 /**
- * Strict mapping for the status step: unlike the legacy grant flow (which
- * treats unrecognized values as FAILED), an unparseable enum is returned as
- * undefined so the caller sees UNKNOWN instead of a definite failure.
+ * Strict mapping for the status step: only the documented provider enums
+ * (`SUCCESS`, `PENDING`, `FAILED`) produce a verdict. Unlike the legacy
+ * grant flow (which treats unrecognized values as FAILED and accepts extra
+ * aliases), anything else returns undefined so the caller sees UNKNOWN.
  */
 function strictPromotionStatus(value: unknown): "GRANTED" | "PENDING" | "FAILED" | undefined {
   const success = readPathValue(value, ["success"]);
@@ -407,10 +406,58 @@ function strictPromotionStatus(value: unknown): "GRANTED" | "PENDING" | "FAILED"
     readPathString(value, ["success.status", "status", "data.status", "data.success"]) ||
     "";
   const status = raw.trim().toUpperCase();
-  if (["SUCCESS", "SUCCEEDED", "GRANTED", "DONE", "COMPLETED"].includes(status)) return "GRANTED";
-  if (["PENDING", "WAITING", "PROCESSING"].includes(status)) return "PENDING";
-  if (["FAILED", "FAIL"].includes(status)) return "FAILED";
+  if (status === "SUCCESS") return "GRANTED";
+  if (status === "PENDING") return "PENDING";
+  if (status === "FAILED") return "FAILED";
   return undefined;
+}
+
+/**
+ * Resolves the promotion code for the explicit steps: a present-but-invalid
+ * request value is rejected instead of being silently replaced by the
+ * configured default, so the executed grant always matches what the caller
+ * persisted for the key.
+ */
+function resolvePromotionCode(
+  request: Record<string, unknown>,
+  options: NormalizedAppsInTossCoreOptions,
+  action: string
+) {
+  if (isPresent(request.promotionCode)) {
+    const code = stringOrUndefined(request.promotionCode);
+    if (!code) {
+      throw clientError("INVALID_PROMOTION_CODE", `promotionCode must be a non-empty string to ${action}`);
+    }
+    return code;
+  }
+  if (options.tossPromotionCode) return options.tossPromotionCode;
+  throw clientError("MISSING_PROMOTION_CODE", `promotionCode is required to ${action}`);
+}
+
+/**
+ * Resolves the grant amount for the execute step under the same rule: an
+ * explicitly supplied invalid amount (zero, negative, fractional) is
+ * rejected rather than swapped for the configured default.
+ */
+function resolvePromotionAmount(
+  request: Record<string, unknown>,
+  options: NormalizedAppsInTossCoreOptions,
+  action: string
+) {
+  const raw = request.amount ?? request.promotionAmount;
+  if (raw !== undefined && raw !== null) {
+    const amount = positiveIntegerOrUndefined(raw);
+    if (!amount) {
+      throw clientError("INVALID_PROMOTION_AMOUNT", `amount must be a positive integer to ${action}`);
+    }
+    return amount;
+  }
+  if (options.tossPromotionAmount) return options.tossPromotionAmount;
+  throw clientError("MISSING_PROMOTION_AMOUNT", `amount is required to ${action}`);
+}
+
+function isPresent(value: unknown) {
+  return value !== undefined && value !== null;
 }
 
 function unknownStatus(
