@@ -1906,6 +1906,31 @@ describe("smart message send-result evidence validation", () => {
     expect(response).toMatchObject({ ok: false, providerStatus: "UNKNOWN", sentAt: 777 });
   });
 
+  test.each([
+    ["ok:false with a providerStatus and a SUCCESS envelope", { ok: false, providerStatus: "FAILED", resultType: "SUCCESS", success: { msgCount: 1 } }],
+    ["ok:false with a null providerStatus and counts", { ok: false, providerStatus: null, resultType: "SUCCESS", success: { msgCount: 1 } }],
+    ["a provider FAILED status alongside a SUCCESS envelope", { providerStatus: "FAILED", resultType: "SUCCESS", success: { msgCount: 1 } }]
+  ] as const)("treats %s as a stated failure, never SENT", (_label, upstream) => {
+    const response = normalizeMessageResponse({}, upstream);
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "FAILED" });
+    expect(response).not.toMatchObject({ ok: true });
+  });
+
+  test("bare top-level failure entries on a zero-send response report FAILED", () => {
+    const response = normalizeMessageResponse({}, {
+      msgCount: 0,
+      fail: { sentSms: [{ contentId: "sms-1", reachedFailReason: "phone off" }] }
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "FAILED",
+      failureReason: "phone off",
+      failures: [{ channel: "sentSms", contentId: "sms-1", reachedFailReason: "phone off" }]
+    });
+  });
+
   test("unknown results keep correlation info but never fabricate a sentAt", () => {
     const response = normalizeMessageResponse(
       { providerRequestId: "req-9" },

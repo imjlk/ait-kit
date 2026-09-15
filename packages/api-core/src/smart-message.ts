@@ -164,10 +164,14 @@ export function normalizeMessageResponse(
   }
 
   // An explicit ok:false is a stated failure and always wins over count
-  // evidence or a SUCCESS envelope riding along — unless the response is
-  // an already-normalized one (it carries this module's providerStatus
-  // vocabulary), in which case the normalized branch validates the pair.
-  if (upstreamObject.ok === false && upstreamObject.providerStatus === undefined) {
+  // evidence or a SUCCESS envelope riding along. The only exemption is a
+  // genuinely envelope-free normalized response (this module's own
+  // providerStatus vocabulary, no resultType), which the normalized branch
+  // validates as a pair — an envelope alongside ok:false is contradictory,
+  // not a normalized shape.
+  const isEnvelopeFreeNormalized =
+    envelopeResultType.state === "absent" && upstreamObject.providerStatus !== undefined;
+  if (upstreamObject.ok === false && !isEnvelopeFreeNormalized) {
     return {
       ok: false,
       providerRequestId,
@@ -191,6 +195,25 @@ export function normalizeMessageResponse(
   }
   if (envelopeResultType.state === "present") {
     if (MESSAGE_FAILURE_RESULT_TYPES.has(envelopeResultType.value)) {
+      return {
+        ok: false,
+        providerRequestId,
+        providerStatus: "FAILED",
+        resultType,
+        sentAt: sentAtWithoutNow,
+        failureReason: upstreamFailureReason(upstreamObject),
+        providerErrorCode: upstreamFailureCode(upstreamObject)
+      };
+    }
+    // A provider-emitted FAILED status alongside a SUCCESS envelope is the
+    // provider contradicting itself: the stated failure wins, exactly as
+    // it did before envelope classification existed.
+    const statedStatus = readStrictStringState(upstream, ["providerStatus"]);
+    if (
+      envelopeResultType.value === "SUCCESS" &&
+      statedStatus.state === "present" &&
+      statedStatus.value.toUpperCase() === "FAILED"
+    ) {
       return {
         ok: false,
         providerRequestId,
@@ -342,8 +365,11 @@ export function normalizeMessageResponse(
   const sentFriendtalkCount =
     countReads.sentFriendtalkCount.state === "present" ? countReads.sentFriendtalkCount.value : undefined;
 
-  const failures = collectMessageFailures(result);
-  const contentIds = collectMessageContentIds(result.detail);
+  // Failure entries, channel details, and content IDs live in the SAME
+  // source as the counts (nested result object or the bare top-level
+  // evidence), so a zero-send bare response keeps its failure entries.
+  const failures = collectMessageFailures(countsSource);
+  const contentIds = collectMessageContentIds(countsSource.detail);
   const hasCountEvidence = Object.values(countReads).some((read) => read.state === "present");
   if (!hasCountEvidence && failures.length === 0) {
     // Empty objects, HTML error pages (parsed to { raw }), and SUCCESS
@@ -381,8 +407,8 @@ export function normalizeMessageResponse(
       sentSmsCount,
       sentAlimtalkCount,
       sentFriendtalkCount,
-      detail: result.detail,
-      fail: result.fail,
+      detail: countsSource.detail,
+      fail: countsSource.fail,
       failures: failures.length > 0 ? failures : undefined,
       contentIds: contentIds.length > 0 ? contentIds : undefined
     };
@@ -400,8 +426,8 @@ export function normalizeMessageResponse(
     sentSmsCount,
     sentAlimtalkCount,
     sentFriendtalkCount,
-    detail: result.detail,
-    fail: result.fail,
+    detail: countsSource.detail,
+    fail: countsSource.fail,
     failures: failures.length > 0 ? failures : undefined,
     contentIds: contentIds.length > 0 ? contentIds : undefined
   };
