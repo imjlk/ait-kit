@@ -12,8 +12,13 @@ interface FrameworkCall {
 
 type ScriptedHandler = (call: FrameworkCall) => void;
 
-function fakeFramework(handler: ScriptedHandler): FullScreenAdSupport & { calls: FrameworkCall[] } {
+function fakeFramework(handler: ScriptedHandler): FullScreenAdSupport & {
+  calls: FrameworkCall[];
+  /** Invocations of the cleanup functions returned by SDK registrations. */
+  cleanupCount: () => number;
+} {
   const calls: FrameworkCall[] = [];
+  let cleanups = 0;
   const load = ((params: Parameters<FullScreenAdSupport["loadFullScreenAd"]>[0]) => {
     const call: FrameworkCall = {
       phase: "load",
@@ -23,7 +28,9 @@ function fakeFramework(handler: ScriptedHandler): FullScreenAdSupport & { calls:
     };
     calls.push(call);
     handler(call);
-    return () => {};
+    return () => {
+      cleanups += 1;
+    };
   }) as FullScreenAdSupport["loadFullScreenAd"];
   (load as { isSupported?: () => boolean }).isSupported = () => true;
   const show = ((params: Parameters<FullScreenAdSupport["showFullScreenAd"]>[0]) => {
@@ -35,10 +42,12 @@ function fakeFramework(handler: ScriptedHandler): FullScreenAdSupport & { calls:
     };
     calls.push(call);
     handler(call);
-    return () => {};
+    return () => {
+      cleanups += 1;
+    };
   }) as FullScreenAdSupport["showFullScreenAd"];
   (show as { isSupported?: () => boolean }).isSupported = () => true;
-  return { loadFullScreenAd: load, showFullScreenAd: show, calls };
+  return { loadFullScreenAd: load, showFullScreenAd: show, calls, cleanupCount: () => cleanups };
 }
 
 describe("@ait-kit/sdk/rn ads", () => {
@@ -344,6 +353,188 @@ describe("@ait-kit/sdk/rn ads", () => {
     // A retry registers normally and succeeds.
     await expect(ads.loadFullScreenAd("group-a")).resolves.toBeUndefined();
     expect(framework.calls.filter((call) => call.phase === "load")).toHaveLength(1);
+  });
+
+  test("the load deadline covers loading plus event waiting, not each twice", async () => {
+    // Real timers with generous margins: the loader consumes 40ms of a 60ms
+    // budget, so the caller must see the timeout at ~60ms — not at ~100ms
+    // from a second, full-size event-flow budget.
+    const framework = fakeFramework(() => {
+      // Load registers but never emits.
+    });
+    const ads = createReactNativeAds({
+      framework: () =>
+        Bun.sleep(40).then(() => ({ available: true as const, module: framework })),
+      loadTimeoutMs: 60
+    });
+
+    const startedAt = Date.now();
+    await expect(ads.loadFullScreenAd("group-a")).rejects.toMatchObject({
+      code: "AD_LOAD_TIMEOUT"
+    });
+    const elapsed = Date.now() - startedAt;
+    expect(elapsed).toBeLessThan(95);
+  });
+
+  test("the show deadline covers loading plus event waiting, not each twice", async () => {
+    const framework = fakeFramework((call) => {
+      if (call.phase === "load") {
+        call.emit({ type: "loaded" });
+      }
+      // Show registers but never emits.
+    });
+    const ads = createReactNativeAds({
+      framework: () =>
+        Bun.sleep(40).then(() => ({ available: true as const, module: framework })),
+      showTimeoutMs: 60
+    });
+
+    await ads.loadFullScreenAd("group-a");
+    const startedAt = Date.now();
+    await expect(ads.showFullScreenAd("group-a")).resolves.toEqual({
+      status: "failed",
+      reason: "ad show flow timed out"
+    });
+    const elapsed = Date.now() - startedAt;
+    expect(elapsed).toBeLessThan(95);
+  });
+
+  test("a show timeout returns exactly after its subscription cleanup ran once", async () => {
+    const framework = fakeFramework((call) => {
+      if (call.phase === "load") {
+        call.emit({ type: "loaded" });
+      }
+      // Show registers but never emits.
+    });
+    const ads = createReactNativeAds({ framework, showTimeoutMs: 25 });
+    await ads.loadFullScreenAd("group-a");
+    const cleanupsBeforeShow = framework.cleanupCount();
+
+    await expect(ads.showFullScreenAd("group-a")).resolves.toEqual({
+      status: "failed",
+      reason: "ad show flow timed out"
+    });
+    // The subscription was terminated before the timeout result settled:
+    // exactly one cleanup, no second registration left listening.
+    expect(framework.cleanupCount() - cleanupsBeforeShow).toBe(1);
+    expect(framework.calls.filter((call) => call.phase === "show")).toHaveLength(1);
+  });
+
+  test("a load timeout returns exactly after its subscription cleanup ran once", async () => {
+    const framework = fakeFramework(() => {
+      // Load registers but never emits.
+    });
+    const ads = createReactNativeAds({ framework, loadTimeoutMs: 25 });
+
+    await expect(ads.loadFullScreenAd("group-a")).rejects.toMatchObject({
+      code: "AD_LOAD_TIMEOUT"
+    });
+    expect(framework.cleanupCount()).toBe(1);
+    expect(framework.calls.filter((call) => call.phase === "load")).toHaveLength(1);
+  });
+
+  test("an immediate retry after a caught load failure starts a fresh registration", async () => {
+    let attempt = 0;
+    const framework = fakeFramework((call) => {
+      if (call.phase !== "load") return;
+      attempt += 1;
+      if (attempt === 1) {
+        call.error(new Error("no fill")); // synchronous failure
+      } else {
+        call.emit({ type: "loaded" });
+      }
+    });
+    const ads = createReactNativeAds({ framework });
+
+    // No sleep: the retry must observe the slot as already freed.
+    try {
+      await ads.loadFullScreenAd("group-a");
+    } catch {
+      // expected failure
+    }
+    await expect(ads.loadFullScreenAd("group-a")).resolves.toBeUndefined();
+    expect(framework.calls.filter((call) => call.phase === "load")).toHaveLength(2);
+  });
+
+  test("an immediate show after an awaited load success never sees AD_NOT_LOADED", async () => {
+    const framework = fakeFramework((call) => {
+      if (call.phase === "load") {
+        queueMicrotask(() => call.emit({ type: "loaded" }));
+      } else {
+        queueMicrotask(() => call.emit({ type: "dismissed" }));
+      }
+    });
+    const ads = createReactNativeAds({ framework });
+
+    await ads.loadFullScreenAd("group-a");
+    // No sleep: the slot must already be promoted when the caller resumes.
+    const shown = ads.showFullScreenAd("group-a");
+    await expect(shown).resolves.toEqual({ status: "dismissed" });
+  });
+
+  test("a late show loader resolution never registers after the deadline", async () => {
+    const framework = fakeFramework((call) => {
+      if (call.phase === "load") {
+        call.emit({ type: "loaded" });
+      }
+    });
+    let resolveStalled: (value: { available: true; module: typeof framework }) => void = () => {};
+    let stall = false;
+    const ads = createReactNativeAds({
+      framework: () => {
+        if (stall) {
+          stall = false;
+          return new Promise((resolve) => {
+            resolveStalled = resolve;
+          });
+        }
+        return Promise.resolve({ available: true, module: framework });
+      },
+      showTimeoutMs: 20
+    });
+
+    await ads.loadFullScreenAd("group-a");
+    stall = true;
+    await expect(ads.showFullScreenAd("group-a")).resolves.toEqual({
+      status: "failed",
+      reason: "ad show flow timed out"
+    });
+
+    resolveStalled({ available: true, module: framework });
+    await Bun.sleep(5);
+    expect(framework.calls.filter((call) => call.phase === "show")).toHaveLength(0);
+  });
+
+  test("a timed-out show's late events never touch the next show's state", async () => {
+    const framework = fakeFramework((call) => {
+      if (call.phase === "load") {
+        call.emit({ type: "loaded" });
+      }
+      // Show calls are driven manually by the test.
+    });
+    const ads = createReactNativeAds({ framework, showTimeoutMs: 20 });
+
+    await ads.loadFullScreenAd("group-a");
+    const stale = ads.showFullScreenAd("group-a");
+    await expect(stale).resolves.toEqual({ status: "failed", reason: "ad show flow timed out" });
+
+    // The next cycle is independent: a fresh load + show, and events fired
+    // on the OLD subscription settle nothing on the new one.
+    await ads.loadFullScreenAd("group-a");
+    const fresh = ads.showFullScreenAd("group-a");
+    await Bun.sleep(1); // let the new show register
+    const showCalls = framework.calls.filter((call) => call.phase === "show");
+    expect(showCalls).toHaveLength(2);
+    showCalls[0].emit({ type: "dismissed" }); // stale event: ignored
+    showCalls[1].emit({ type: "userEarnedReward", data: { unitType: "COIN", unitAmount: 10 } });
+    showCalls[1].emit({ type: "dismissed" });
+    await expect(fresh).resolves.toEqual({
+      status: "rewarded",
+      reward: { unitType: "COIN", unitAmount: 10 }
+    });
+    // Every registration cleaned up exactly once: two loads (initial +
+    // reload) and two shows (timed-out + fresh).
+    expect(framework.cleanupCount()).toBe(4);
   });
 
   test("rejects with SDK_UNAVAILABLE when the framework is missing", async () => {
