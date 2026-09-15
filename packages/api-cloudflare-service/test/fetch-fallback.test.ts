@@ -93,7 +93,7 @@ function fakeRpc(
       return { ok: true, providerStatus: "REMOVED" };
     },
     async iapOrderStatus() {
-      return { ok: true, providerStatus: "PURCHASED" };
+      return { ok: true, verified: true, orderId: "order-id", providerStatus: "PURCHASED" };
     },
     async promotionRewardGrant() {
       return { ok: true, providerStatus: "GRANTED" };

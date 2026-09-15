@@ -14,6 +14,9 @@ import {
   TOSS_ENDPOINTS,
   type IapOrderStatusInput,
   type IapOrderStatusResponse,
+  type IapOrderUnverifiedResponse,
+  type IapOrderVerifiedResponse,
+  type IapVerificationCode,
   type NormalizedAppsInTossCoreOptions
 } from "./types";
 
@@ -24,6 +27,20 @@ const RETRYABLE_IAP_ORDER_STATUSES = new Set([
   "PENDING",
   "PROCESSING"
 ]);
+
+const PAYABLE_IAP_ORDER_STATUSES = new Set(["PAYMENT_COMPLETED", "PURCHASED"]);
+
+const VERIFICATION_CODES_BY_PROVIDER_STATUS: Record<string, IapVerificationCode> = {
+  FAILED: "PAYMENT_FAILED",
+  MINIAPP_MISMATCH: "MINIAPP_MISMATCH",
+  NOT_FOUND: "ORDER_NOT_FOUND",
+  ORDER_IN_PROGRESS: "PAYMENT_INCOMPLETE",
+  PAYMENT_PENDING: "PAYMENT_INCOMPLETE",
+  PENDING: "PAYMENT_INCOMPLETE",
+  PROCESSING: "PAYMENT_INCOMPLETE",
+  REFUNDED: "PAYMENT_REFUNDED",
+  ERROR: "PROVIDER_STATUS_ERROR"
+};
 
 export async function getIapOrderStatus(
   body: IapOrderStatusInput,
@@ -68,6 +85,11 @@ export async function getIapOrderStatus(
   return normalized ?? { ok: false, providerStatus: "ERROR", failureReason: "IAP order status was not checked" };
 }
 
+/**
+ * Normalizes a provider `get-order-status` answer into the verification
+ * contract: request expectations (`orderId`, `sku`) are only ever compared
+ * against provider-returned evidence, never used to fill evidence gaps.
+ */
 export function normalizeIapOrderStatusResponse(
   requestBody: IapOrderStatusInput,
   upstream: unknown,
@@ -85,12 +107,57 @@ export function normalizeIapOrderStatusResponse(
   }
 
   const order = objectOrSelf(readOrderValue(upstream), objectOrSelf(upstream, {}));
-  const providerStatus = readPathString(order, ["status", "success.status", "data.status"]) || "ERROR";
-  return {
-    ok: true,
-    orderId: readPathString(order, ["orderId", "success.orderId", "data.orderId"]) ?? stringOrUndefined(request.orderId),
-    sku: readPathString(order, ["sku", "success.sku", "data.sku"]) ?? stringOrUndefined(request.sku),
-    providerStatus: String(providerStatus),
+  const providerOrderId = readPathString(order, ["orderId", "success.orderId", "data.orderId"]);
+  if (!providerOrderId) {
+    return {
+      ok: false,
+      orderId: stringOrUndefined(request.orderId),
+      providerStatus: "ERROR",
+      error: "INVALID_RESPONSE",
+      failureReason: "success payload is missing the required orderId",
+      upstreamStatus
+    };
+  }
+  const providerStatus =
+    readPathString(order, ["status", "success.status", "data.status"])?.trim().toUpperCase() || "";
+  if (!providerStatus) {
+    return {
+      ok: false,
+      orderId: providerOrderId,
+      providerStatus: "ERROR",
+      error: "INVALID_RESPONSE",
+      failureReason: "success payload is missing the required status",
+      upstreamStatus
+    };
+  }
+
+  // Verification ties the provider payload to the caller's expectation; a
+  // missing requested order ID cannot confirm anything (defensive for direct
+  // normalizeIapOrderStatusResponse callers — the forward path validates it).
+  const requestedOrderId = stringOrUndefined(request.orderId);
+  if (!requestedOrderId) {
+    return {
+      ok: false,
+      orderId: providerOrderId,
+      providerStatus: "ERROR",
+      error: "MISSING_ORDER_ID",
+      failureReason: "order status verification requires a requested orderId",
+      upstreamStatus
+    };
+  }
+
+  // SKU evidence comes from the provider response only; it is optional per the
+  // official API and its absence never flips `verified` on a payable status.
+  const providerSku = readPathString(order, ["sku", "success.sku", "data.sku"]);
+  const expectedSku = stringOrUndefined(request.sku);
+
+  const orderIdMatches = providerOrderId === requestedOrderId;
+  const payable = PAYABLE_IAP_ORDER_STATUSES.has(providerStatus);
+
+  const shared = {
+    ok: true as const,
+    orderId: providerOrderId,
+    providerStatus,
     statusDeterminedAt: readPathString(order, [
       "statusDeterminedAt",
       "success.statusDeterminedAt",
@@ -98,18 +165,62 @@ export function normalizeIapOrderStatusResponse(
     ]),
     reason: readPathString(order, ["reason", "success.reason", "data.reason"])
   };
+
+  if (payable && orderIdMatches) {
+    const response: IapOrderVerifiedResponse = { ...shared, verified: true };
+    if (providerSku !== undefined) response.sku = providerSku;
+    const check = skuCheck(providerSku, expectedSku);
+    if (check) response.skuCheck = check;
+    return response;
+  }
+
+  const response: IapOrderUnverifiedResponse = {
+    ...shared,
+    verified: false,
+    verificationCode: orderIdMatches
+      ? (VERIFICATION_CODES_BY_PROVIDER_STATUS[providerStatus] ?? "UNKNOWN_STATUS")
+      : "ORDER_ID_MISMATCH"
+  };
+  if (providerSku !== undefined) response.sku = providerSku;
+  const check = skuCheck(providerSku, expectedSku);
+  if (check) response.skuCheck = check;
+  return response;
+}
+
+function skuCheck(
+  providerSku: string | undefined,
+  expectedSku: string | undefined
+): IapOrderVerifiedResponse["skuCheck"] {
+  if (expectedSku === undefined) return undefined;
+  if (providerSku === undefined) return { status: "NOT_PROVIDED" };
+  return { status: providerSku === expectedSku ? "MATCHED" : "MISMATCHED", providerSku };
 }
 
 function stubIapOrderStatus(body: IapOrderStatusInput): IapOrderStatusResponse {
   const request = objectOrSelf(body, {});
-  return {
+  const orderId = stringOrUndefined(request.orderId);
+  if (!orderId) {
+    return { ok: false, error: "MISSING_ORDER_ID", providerStatus: "ERROR" };
+  }
+  // Synthetic development data: never verified, so an omitted mode setting can
+  // never turn fabricated orders into grantable ones. Development flows that
+  // want to exercise grant logic must opt in by checking `stub: true`.
+  const expectedSku = stringOrUndefined(request.sku);
+  const response: IapOrderUnverifiedResponse = {
     ok: true,
-    orderId: String(request.orderId || ""),
-    sku: String(request.sku || ""),
+    verified: false,
+    verificationCode: "STUB_EVIDENCE",
+    orderId,
     providerStatus: "PAYMENT_COMPLETED",
     statusDeterminedAt: new Date(0).toISOString(),
-    reason: "stub iap order status"
+    reason: "stub iap order status",
+    stub: true
   };
+  if (expectedSku !== undefined) {
+    response.sku = expectedSku;
+    response.skuCheck = { status: "MATCHED", providerSku: expectedSku };
+  }
+  return response;
 }
 
 function readOrderValue(upstream: unknown) {

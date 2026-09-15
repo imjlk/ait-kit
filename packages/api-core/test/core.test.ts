@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createAppsInTossApiRpc,
   createAppsInTossApi,
+  normalizeIapOrderStatusResponse,
   normalizeMessageResponse,
   TOSS_ENDPOINTS,
   type MtlsClient
@@ -154,7 +155,14 @@ describe("@ait-kit/api-core", () => {
 
     const response = await api.iapOrderStatus({ orderId: "order-id" });
 
-    expect(response).toMatchObject({ ok: true, orderId: "order-id", providerStatus: "PAYMENT_COMPLETED" });
+    expect(response).toMatchObject({
+      ok: true,
+      verified: true,
+      orderId: "order-id",
+      providerStatus: "PAYMENT_COMPLETED"
+    });
+    expect(response).not.toHaveProperty("sku");
+    expect(response).not.toHaveProperty("skuCheck");
     expect(seenHeaders.get("x-toss-user-key")).toBeNull();
   });
 
@@ -180,6 +188,225 @@ describe("@ait-kit/api-core", () => {
       providerStatus: "ERROR",
       failureReason: "order service unavailable",
       upstreamStatus: 503
+    });
+  });
+
+  function forwardIapApi(handler: MtlsClient["request"], options: Record<string, unknown> = {}) {
+    const mtlsClient: MtlsClient = { request: handler };
+    return createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient,
+        iapOrderStatusRetryDelayMs: 0,
+        ...options
+      })
+    );
+  }
+
+  test("does not backfill the request SKU when the provider omits SKU evidence", async () => {
+    const api = forwardIapApi(async () =>
+      Response.json({
+        resultType: "SUCCESS",
+        success: { orderId: "order-id", status: "PAYMENT_COMPLETED" }
+      })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", sku: "expected-sku" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      verified: true,
+      orderId: "order-id",
+      providerStatus: "PAYMENT_COMPLETED",
+      skuCheck: { status: "NOT_PROVIDED" }
+    });
+    expect(response).not.toHaveProperty("sku");
+    expect(response).not.toHaveProperty("verificationCode");
+  });
+
+  test("verifies a payable order with matching provider SKU evidence", async () => {
+    const api = forwardIapApi(async () =>
+      Response.json({
+        resultType: "SUCCESS",
+        success: { orderId: "order-id", status: "PURCHASED", sku: "expected-sku" }
+      })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", sku: "expected-sku" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      verified: true,
+      orderId: "order-id",
+      sku: "expected-sku",
+      skuCheck: { status: "MATCHED", providerSku: "expected-sku" }
+    });
+  });
+
+  test("reports a provider SKU mismatch without rejecting the paid order", async () => {
+    const api = forwardIapApi(async () =>
+      Response.json({
+        resultType: "SUCCESS",
+        success: { orderId: "order-id", status: "PAYMENT_COMPLETED", sku: "other-sku" }
+      })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", sku: "expected-sku" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      verified: true,
+      sku: "other-sku",
+      skuCheck: { status: "MISMATCHED", providerSku: "other-sku" }
+    });
+  });
+
+  test("fails verification when the provider order ID differs from the request", async () => {
+    const api = forwardIapApi(async () =>
+      Response.json({
+        resultType: "SUCCESS",
+        success: { orderId: "other-order", status: "PAYMENT_COMPLETED", sku: "expected-sku" }
+      })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", sku: "expected-sku" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      verified: false,
+      orderId: "other-order",
+      verificationCode: "ORDER_ID_MISMATCH"
+    });
+  });
+
+  test.each([
+    ["ORDER_IN_PROGRESS", "PAYMENT_INCOMPLETE", false],
+    ["FAILED", "PAYMENT_FAILED", false],
+    ["REFUNDED", "PAYMENT_REFUNDED", false],
+    ["MINIAPP_MISMATCH", "MINIAPP_MISMATCH", false],
+    ["ERROR", "PROVIDER_STATUS_ERROR", false],
+    ["SOMETHING_WEIRD", "UNKNOWN_STATUS", false]
+  ] as const)(
+    "maps provider status %s to verification code %s",
+    async (status, verificationCode) => {
+      const calls: unknown[] = [];
+      const api = forwardIapApi(async (_url, init) => {
+        calls.push(JSON.parse(String(init.body)));
+        return Response.json({ resultType: "SUCCESS", success: { orderId: "order-id", status } });
+      }, { iapOrderStatusMaxAttempts: 1 });
+
+      const response = await api.iapOrderStatus({ orderId: "order-id" });
+
+      expect(response).toMatchObject({
+        ok: true,
+        verified: false,
+        orderId: "order-id",
+        providerStatus: status,
+        verificationCode
+      });
+      expect(calls).toEqual([{ orderId: "order-id" }]);
+    }
+  );
+
+  test("keeps the pending re-query flow for incomplete payments", async () => {
+    const bodies: unknown[] = [];
+    let calls = 0;
+    const api = forwardIapApi(async (_url, init) => {
+      calls += 1;
+      bodies.push(JSON.parse(String(init.body)));
+      return Response.json({
+        resultType: "SUCCESS",
+        success:
+          calls === 1
+            ? { orderId: "order-id", status: "ORDER_IN_PROGRESS" }
+            : { orderId: "order-id", status: "PAYMENT_COMPLETED", sku: "expected-sku" }
+      });
+    }, { iapOrderStatusMaxAttempts: 3 });
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", sku: "expected-sku" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      verified: true,
+      orderId: "order-id",
+      providerStatus: "PAYMENT_COMPLETED",
+      skuCheck: { status: "MATCHED" },
+      attempts: 2
+    });
+    expect(bodies).toEqual([{ orderId: "order-id" }, { orderId: "order-id" }]);
+  });
+
+  test("reports ORDER_NOT_FOUND after exhausting retries", async () => {
+    let calls = 0;
+    const api = forwardIapApi(async () => {
+      calls += 1;
+      return Response.json({ resultType: "SUCCESS", success: { orderId: "order-id", status: "NOT_FOUND" } });
+    }, { iapOrderStatusMaxAttempts: 2 });
+
+    const response = await api.iapOrderStatus({ orderId: "order-id" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      verified: false,
+      verificationCode: "ORDER_NOT_FOUND",
+      attempts: 2
+    });
+    expect(calls).toBe(2);
+  });
+
+  test.each([
+    ["orderId", { status: "PAYMENT_COMPLETED" }],
+    ["status", { orderId: "order-id" }]
+  ] as const)("treats a success payload missing %s as an invalid response", async (_field, success) => {
+    const api = forwardIapApi(async () => Response.json({ resultType: "SUCCESS", success }));
+
+    const response = await api.iapOrderStatus({ orderId: "order-id" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "INVALID_RESPONSE",
+      providerStatus: "ERROR"
+    });
+  });
+
+  test("validates stub input like forward mode", async () => {
+    const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub" }));
+
+    await expect(api.iapOrderStatus({ sku: "expected-sku" })).resolves.toMatchObject({
+      ok: false,
+      error: "MISSING_ORDER_ID",
+      providerStatus: "ERROR"
+    });
+  });
+
+  test("marks stub order status output as synthetic evidence", async () => {
+    const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub" }));
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", sku: "expected-sku" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      verified: false,
+      verificationCode: "STUB_EVIDENCE",
+      orderId: "order-id",
+      providerStatus: "PAYMENT_COMPLETED",
+      sku: "expected-sku",
+      skuCheck: { status: "MATCHED", providerSku: "expected-sku" },
+      stub: true
+    });
+  });
+
+  test("requires a requested order ID when normalizing directly", () => {
+    const response = normalizeIapOrderStatusResponse(
+      {},
+      { resultType: "SUCCESS", success: { orderId: "provider-order", status: "PAYMENT_COMPLETED" } }
+    );
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "MISSING_ORDER_ID",
+      orderId: "provider-order"
     });
   });
 

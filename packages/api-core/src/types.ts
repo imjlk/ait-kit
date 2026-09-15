@@ -123,22 +123,103 @@ export type TossLoginRemoveByUserKeyResponse =
     }
   | ProviderFailure;
 
+/**
+ * Input for the Apps in Toss in-app-purchase order status query.
+ *
+ * The official `get-order-status` request body only accepts `orderId`;
+ * `sku` is a caller-side expectation and is never sent upstream or used as
+ * verification evidence.
+ */
 export interface IapOrderStatusInput {
   orderId?: string;
   tossUserKey?: string;
+  /**
+   * Expected product SKU, compared only against the provider-returned SKU
+   * (see `IapOrderStatusResponse.skuCheck`). Never substitutes for missing
+   * provider evidence and never creates a payable state on its own.
+   */
   sku?: string;
 }
 
+/**
+ * Why a successfully queried order did not verify as a payable purchase.
+ * Ordered with the provider status that produces each code.
+ */
+export type IapVerificationCode =
+  | "PAYMENT_INCOMPLETE" // ORDER_IN_PROGRESS (and legacy pending states; retryable)
+  | "PAYMENT_FAILED" // FAILED
+  | "PAYMENT_REFUNDED" // REFUNDED
+  | "MINIAPP_MISMATCH" // MINIAPP_MISMATCH
+  | "ORDER_NOT_FOUND" // NOT_FOUND (retryable per the pending re-query flow)
+  | "ORDER_ID_MISMATCH" // provider-returned orderId differs from the request
+  | "UNKNOWN_STATUS" // status outside the documented provider enum
+  | "PROVIDER_STATUS_ERROR" // ERROR
+  | "STUB_EVIDENCE"; // synthetic stub output; never provider evidence
+
+/** Outcome of comparing the caller's expected SKU with provider evidence. */
+export type IapSkuCheckStatus = "MATCHED" | "MISMATCHED" | "NOT_PROVIDED";
+
+/** Shared evidence fields for both verified and unverified query successes. */
+interface IapOrderStatusSuccess {
+  /** The provider status query succeeded with a valid payload. */
+  ok: true;
+  /**
+   * Order ID exactly as returned by the provider. Never copied from the
+   * request; a payload without it fails with `error: "INVALID_RESPONSE"`.
+   */
+  orderId: string;
+  /**
+   * Product SKU exactly as returned by the provider. Never backfilled
+   * from the request expectation.
+   */
+  sku?: string;
+  providerStatus: string;
+  statusDeterminedAt?: string;
+  reason?: string;
+  attempts?: number;
+  /**
+   * Present exactly when the caller supplied an expected SKU.
+   * `providerSku` mirrors `sku` for convenience.
+   */
+  skuCheck?: {
+    status: IapSkuCheckStatus;
+    providerSku?: string;
+  };
+  /** Synthetic stub-mode output; never present in forward mode. */
+  stub?: true;
+}
+
+/** Provider evidence confirms a payable purchase for the requested order. */
+export interface IapOrderVerifiedResponse extends IapOrderStatusSuccess {
+  verified: true;
+}
+
+/** The queried order did not verify as payable; `verificationCode` says why. */
+export interface IapOrderUnverifiedResponse extends IapOrderStatusSuccess {
+  verified: false;
+  verificationCode: IapVerificationCode;
+}
+
+/**
+ * Result of the in-app-purchase order status query.
+ *
+ * `ok` means the status query itself succeeded: the provider answered with a
+ * well-formed, provider-attested payload. `verified` means the provider
+ * evidence confirms the requested order reached a payable status
+ * (`PAYMENT_COMPLETED` or `PURCHASED`) with a matching order ID. Granting
+ * decisions must gate on `verified`, not on `ok`. Stub-mode output is never
+ * verified; it reports `verificationCode: "STUB_EVIDENCE"` with `stub: true`.
+ *
+ * Per the official API, the response `sku` and `statusDeterminedAt` are
+ * optional (omitted for `MINIAPP_MISMATCH`, `NOT_FOUND`, and `ERROR`), so a
+ * missing SKU never flips `verified` on its own; it is reported through
+ * `skuCheck.status === "NOT_PROVIDED"` for the caller to decide. There is no
+ * supplementary lookup endpoint, so incomplete evidence on a payable status
+ * can only be retried through this same query.
+ */
 export type IapOrderStatusResponse =
-  | {
-      ok: true;
-      orderId?: string;
-      sku?: string;
-      providerStatus: string;
-      statusDeterminedAt?: string;
-      reason?: string;
-      attempts?: number;
-    }
+  | IapOrderVerifiedResponse
+  | IapOrderUnverifiedResponse
   | ProviderFailure;
 
 export interface PromotionRewardGrantInput {
