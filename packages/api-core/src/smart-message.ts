@@ -199,7 +199,8 @@ export function normalizeMessageResponse(
   const envelopeResultType = readUniqueStrictString(upstream, [
     "resultType",
     "success.resultType",
-    "data.resultType"
+    "data.resultType",
+    "result.resultType"
   ]);
   const resultType = envelopeResultType.state === "present" ? envelopeResultType.value : undefined;
   // Classification uses the normalized enum (trim + case) like the old
@@ -339,6 +340,44 @@ export function normalizeMessageResponse(
     !upstreamObject.result &&
     (upstreamObject.providerStatus !== undefined || upstreamObject.status !== undefined)
   ) {
+    // All aliases are validated (the same reader the SUCCESS-envelope
+    // guard uses), so a preferred providerStatus cannot hide a failing or
+    // contradicting status alias.
+    const stated = readStatedStatusAliases(upstream);
+    if (stated.state === "invalid") {
+      return unknownMessageResult(providerRequestId, stated.reason, upstreamStatus, undefined, undefined, sentAtWithoutNow);
+    }
+    if (stated.state === "absent") {
+      return unknownMessageResult(
+        providerRequestId,
+        "providerStatus was not a string",
+        upstreamStatus,
+        undefined,
+        undefined,
+        sentAtWithoutNow
+      );
+    }
+    if (stated.failures.length > 0) {
+      return {
+        ok: false,
+        providerRequestId,
+        providerStatus: "FAILED",
+        sentAt: sentAtWithoutNow,
+        failureReason: stringOrUndefined(
+          upstreamObject.failureReason ?? upstreamObject.errorMessage ?? upstreamObject.message
+        )
+      };
+    }
+    if (stated.conflicting) {
+      return unknownMessageResult(
+        providerRequestId,
+        "conflicting providerStatus and status aliases",
+        upstreamStatus,
+        undefined,
+        undefined,
+        sentAtWithoutNow
+      );
+    }
     const normalizedStatus = readStrictStringState(upstream, ["providerStatus", "status"]);
     if (normalizedStatus.state !== "present") {
       return unknownMessageResult(
@@ -479,7 +518,19 @@ export function normalizeMessageResponse(
     );
   }
   const contentIds = collectMessageContentIds(countsSource.detail);
-  const hasCountEvidence = Object.values(countReads).some((read) => read.state === "present");
+  // Only an explicit msgCount (0 included) or a positive channel subtotal
+  // confirms a send result: zero-valued channel subtotals alone say
+  // nothing was delivered and nothing proves a result object exists.
+  const channelValues = [
+    countReads.sentPushCount,
+    countReads.sentInboxCount,
+    countReads.sentSmsCount,
+    countReads.sentAlimtalkCount,
+    countReads.sentFriendtalkCount
+  ];
+  const hasCountEvidence =
+    countReads.msgCount.state === "present" ||
+    channelValues.some((read) => read.state === "present" && read.value > 0);
   if (!hasCountEvidence && failures.length === 0) {
     // Empty objects, HTML error pages (parsed to { raw }), and SUCCESS
     // envelopes without a send-result object: nothing confirms delivery.

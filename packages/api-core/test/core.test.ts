@@ -2171,6 +2171,62 @@ describe("smart message send-result evidence validation", () => {
     expect(iap).not.toMatchObject({ verified: true });
   });
 
+  test.each([
+    [
+      "IAP",
+      (body: unknown) => normalizeIapOrderStatusResponse({ orderId: "order-id" }, body),
+      { resultType: "SUCCESS", result: { resultType: "FAIL", orderId: "order-id", status: "PAYMENT_COMPLETED" } }
+    ]
+  ] as const)("never verifies a nested result.resultType FAIL under a SUCCESS envelope", (_label, normalize, upstream) => {
+    const response = normalize(upstream);
+    expect(response).toMatchObject({ ok: false, error: "INVALID_RESPONSE" });
+    expect(response).not.toMatchObject({ verified: true });
+  });
+
+  test("a nested result.resultType FAIL under a SUCCESS envelope never sends", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { resultType: "SUCCESS", result: { resultType: "FAIL", msgCount: 1 } }
+    );
+
+    expect(response).toMatchObject({ ok: false, error: "INVALID_RESPONSE" });
+  });
+
+  test("zero-valued channel subtotals without msgCount are not send evidence", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { resultType: "SUCCESS", success: { sentSmsCount: 0 } }
+    );
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE"
+    });
+    expect(response).not.toMatchObject({ ok: true });
+  });
+
+  test("a positive channel subtotal without msgCount confirms a send result", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { resultType: "SUCCESS", success: { sentSmsCount: 1 } }
+    );
+
+    expect(response).toMatchObject({ ok: true, providerStatus: "SENT", sentSmsCount: 1 });
+  });
+
+  test("a normalized SENT with a hidden FAILED status alias is a failure", () => {
+    const hidden = normalizeMessageResponse({}, { ok: true, providerStatus: "SENT", status: "FAILED" });
+    expect(hidden).toMatchObject({ ok: false, providerStatus: "FAILED" });
+
+    const conflicting = normalizeMessageResponse({}, { ok: true, providerStatus: "SENT", status: "WEIRD" });
+    expect(conflicting).toMatchObject({
+      ok: false,
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE"
+    });
+  });
+
   test("unknown results keep correlation info but never fabricate a sentAt", () => {
     const response = normalizeMessageResponse(
       { providerRequestId: "req-9" },

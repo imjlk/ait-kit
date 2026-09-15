@@ -145,7 +145,8 @@ export function normalizeIapOrderStatusResponse(
   const envelopeResultType = readUniqueStrictString(upstream, [
     "resultType",
     "success.resultType",
-    "data.resultType"
+    "data.resultType",
+    "result.resultType"
   ]);
   if (envelopeResultType.state === "invalid") {
     return invalidIapResponse(request, envelopeResultType.reason, upstreamStatus);
