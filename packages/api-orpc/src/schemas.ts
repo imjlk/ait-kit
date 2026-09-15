@@ -76,6 +76,7 @@ export const smartMessageOutputSchema = z.discriminatedUnion("ok", [
     ...smartMessageOutputBase,
     failureReason: z.string().optional(),
     providerErrorCode: z.string().optional(),
-    upstreamStatus: z.number().int().optional()
+    upstreamStatus: z.number().int().optional(),
+    error: z.string().optional()
   })
 ]);

@@ -197,6 +197,46 @@ export function readPathString(value: unknown, paths: string[]) {
   return String(found);
 }
 
+/**
+ * Outcome of a strict evidence read: `absent` (the field is not present at
+ * all), `present` (a real, usable value), or `invalid` (the field exists
+ * but with an unusable type — e.g. a single-element array where a string
+ * was expected). Distinguishing `absent` from `invalid` lets callers allow
+ * documented-optional fields while still rejecting tampered-looking
+ * evidence instead of coercing it.
+ */
+export type StrictReadState<T> =
+  | { state: "present"; value: T }
+  | { state: "absent" }
+  | { state: "invalid" };
+
+/**
+ * Strict string read for verification evidence: only a real, non-blank
+ * string counts. Unlike {@link readPathString}, values are never coerced —
+ * an array, object, number, or boolean at the path is `invalid`, never a
+ * stringified stand-in.
+ */
+export function readStrictStringState(value: unknown, paths: string[]): StrictReadState<string> {
+  const found = readPathValue(value, paths);
+  if (found === undefined || found === null) return { state: "absent" };
+  if (typeof found !== "string") return { state: "invalid" };
+  const trimmed = found.trim();
+  return trimmed ? { state: "present", value: trimmed } : { state: "invalid" };
+}
+
+/**
+ * Strict non-negative integer read for count evidence: only real integers
+ * >= 0 count. Floats, numeric strings, arrays, or objects are `invalid`.
+ */
+export function readStrictNonNegativeIntState(value: unknown, paths: string[]): StrictReadState<number> {
+  const found = readPathValue(value, paths);
+  if (found === undefined || found === null) return { state: "absent" };
+  if (typeof found !== "number" || !Number.isInteger(found) || found < 0) {
+    return { state: "invalid" };
+  }
+  return { state: "present", value: found };
+}
+
 export function readPathValue(value: unknown, paths: string[]) {
   for (const path of paths) {
     let current: unknown = value;

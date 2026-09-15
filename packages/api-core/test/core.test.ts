@@ -1750,3 +1750,221 @@ describe("@ait-kit/api-core", () => {
     });
   });
 });
+
+describe("IAP provider evidence type validation", () => {
+  test.each([
+    ["an orderId array", { orderId: ["order-id"], status: "PAYMENT_COMPLETED" }],
+    ["an orderId object", { orderId: { id: "order-id" }, status: "PAYMENT_COMPLETED" }],
+    ["a numeric orderId", { orderId: 12345, status: "PAYMENT_COMPLETED" }],
+    ["a status array", { orderId: "order-id", status: ["PAYMENT_COMPLETED"] }],
+    ["a boolean status", { orderId: "order-id", status: true }],
+    ["a sku array on a payable order", { orderId: "order-id", status: "PAYMENT_COMPLETED", sku: ["sku-a"] }],
+    ["an object statusDeterminedAt", { orderId: "order-id", status: "PAYMENT_COMPLETED", statusDeterminedAt: { t: 1 } }]
+  ] as const)("rejects %s as verification evidence", (_label, success) => {
+    const response = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: "SUCCESS", success }
+    );
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "INVALID_RESPONSE",
+      orderId: "order-id",
+      providerStatus: "ERROR"
+    });
+    expect(response).not.toMatchObject({ verified: true });
+  });
+
+  test.each([
+    ["a NETWORK_ERROR envelope with a contradictory success payload", { resultType: "NETWORK_ERROR", success: { orderId: "order-id", status: "PAYMENT_COMPLETED" } }],
+    ["a FAIL envelope with a success payload", { resultType: "FAIL", success: { orderId: "order-id", status: "PAYMENT_COMPLETED" }, error: { errorCode: "500" } }],
+    ["a TIMEOUT envelope", { resultType: "TIMEOUT", success: { orderId: "order-id", status: "PAYMENT_COMPLETED" } }]
+  ] as const)("never verifies %s", (_label, upstream) => {
+    const response = normalizeIapOrderStatusResponse({ orderId: "order-id" }, upstream);
+
+    expect(response.ok).toBe(false);
+    expect(response).not.toMatchObject({ verified: true });
+  });
+
+  test("rejects an unrecognized envelope resultType even with a full success payload", () => {
+    const response = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: "OK", success: { orderId: "order-id", status: "PAYMENT_COMPLETED" } }
+    );
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "INVALID_RESPONSE",
+      failureReason: expect.stringContaining("OK")
+    });
+  });
+
+  test("missing optional evidence stays valid while wrong-typed evidence does not", () => {
+    const clean = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: "SUCCESS", success: { orderId: "order-id", status: "PURCHASED" } }
+    );
+    expect(clean).toMatchObject({ ok: true, verified: true });
+
+    const wrongTypedSku = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: "SUCCESS", success: { orderId: "order-id", status: "PURCHASED", sku: 42 } }
+    );
+    expect(wrongTypedSku).toMatchObject({ ok: false, error: "INVALID_RESPONSE" });
+  });
+
+  test("network error responses keep the provider error code for diagnostics", () => {
+    const response = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: "NETWORK_ERROR", error: { errorCode: "9019", errorMessage: "gateway unreachable" } }
+    );
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "ERROR",
+      providerErrorCode: "9019",
+      failureReason: "gateway unreachable"
+    });
+  });
+});
+
+describe("smart message send-result evidence validation", () => {
+  test.each([
+    ["an empty object", {}],
+    ["an HTML error page", { raw: "<html><body>502 Bad Gateway</body></html>" }],
+    ["a SUCCESS envelope without a send result", { resultType: "SUCCESS" }],
+    ["a SUCCESS envelope with an empty result object", { resultType: "SUCCESS", success: {} }],
+    ["an unrecognized resultType", { resultType: "WEIRD", success: { msgCount: 1 } }],
+    ["a string msgCount", { resultType: "SUCCESS", success: { msgCount: "1" } }],
+    ["an array msgCount", { resultType: "SUCCESS", success: { msgCount: [1] } }],
+    ["a negative channel count", { resultType: "SUCCESS", success: { msgCount: 1, sentSmsCount: -3 } }],
+    ["a NETWORK_ERROR envelope", { resultType: "NETWORK_ERROR" }],
+    ["a TIMEOUT envelope", { resultType: "TIMEOUT" }]
+  ] as const)("never reports %s as SENT", (_label, upstream) => {
+    const response = normalizeMessageResponse({ providerRequestId: "req-1" }, upstream);
+
+    expect(response.ok).toBe(false);
+    expect(response.providerStatus).not.toBe("SENT");
+    if (["an empty object", "an HTML error page", "a SUCCESS envelope without a send result", "a SUCCESS envelope with an empty result object", "an unrecognized resultType", "a string msgCount", "an array msgCount", "a negative channel count"].includes(_label)) {
+      expect(response).toMatchObject({ providerStatus: "UNKNOWN", error: "INVALID_RESPONSE" });
+    } else {
+      expect(response).toMatchObject({ providerStatus: "UNKNOWN" });
+    }
+  });
+
+  test("unknown results keep correlation info but never fabricate a sentAt", () => {
+    const response = normalizeMessageResponse(
+      { providerRequestId: "req-9" },
+      { resultType: "SUCCESS", success: {} },
+      200,
+      () => {
+        throw new Error("the clock must not be consulted for unknown results");
+      }
+    );
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerRequestId: "req-9",
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE"
+    });
+    expect(response.sentAt).toBeUndefined();
+  });
+
+  test("an explicit zero-count response is a valid SENT, distinct from a missing result", () => {
+    const response = normalizeMessageResponse({}, { resultType: "SUCCESS", success: { msgCount: 0 } });
+
+    expect(response).toMatchObject({ ok: true, providerStatus: "SENT", msgCount: 0 });
+  });
+
+  test("a 5xx response stays UNKNOWN while a 4xx is a definite failure", () => {
+    const serverError = normalizeMessageResponse({}, { message: "upstream exploded" }, 503);
+    expect(serverError).toMatchObject({ ok: false, providerStatus: "UNKNOWN", upstreamStatus: 503 });
+    expect(serverError.sentAt).toBeUndefined();
+
+    const rejected = normalizeMessageResponse({}, { message: "bad template" }, 400);
+    expect(rejected).toMatchObject({ ok: false, providerStatus: "FAILED", upstreamStatus: 400 });
+  });
+
+  test("explicit provider failures keep the provider error code, not an internal one", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { resultType: "FAIL", error: { errorCode: "4008", errorMessage: "invalid recipient" } }
+    );
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "FAILED",
+      providerErrorCode: "4008",
+      failureReason: "invalid recipient"
+    });
+    expect(response).not.toHaveProperty("error");
+  });
+
+  test("partial success preserves channel results, failure reasons, and contentIds", () => {
+    const response = normalizeMessageResponse(
+      {},
+      {
+        resultType: "SUCCESS",
+        success: {
+          msgCount: 2,
+          sentPushCount: 1,
+          sentSmsCount: 0,
+          detail: { sentPush: [{ contentId: "push-1" }] },
+          fail: { sentSms: [{ contentId: "sms-1", reachedFailReason: "phone off" }] }
+        }
+      }
+    );
+
+    expect(response).toMatchObject({
+      ok: true,
+      providerStatus: "SENT",
+      msgCount: 2,
+      sentPushCount: 1,
+      contentIds: ["push-1"],
+      failures: [{ channel: "sentSms", contentId: "sms-1", reachedFailReason: "phone off" }]
+    });
+  });
+
+  test("already-normalized SENT responses round-trip under their explicit rule", () => {
+    const roundTrip = normalizeMessageResponse({}, {
+      ok: true,
+      providerStatus: "SENT",
+      msgCount: 1,
+      sentAt: 1234
+    });
+    expect(roundTrip).toMatchObject({ ok: true, providerStatus: "SENT" });
+
+    const unknownStatus = normalizeMessageResponse({}, { providerStatus: "WEIRD", msgCount: 1 });
+    expect(unknownStatus).toMatchObject({ ok: false, providerStatus: "UNKNOWN", error: "INVALID_RESPONSE" });
+  });
+
+  test("bulk sends share the same evidence rule through the forward path", async () => {
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient: {
+          async request() {
+            return new Response("<html>gateway error</html>", {
+              status: 200,
+              headers: { "content-type": "text/html" }
+            });
+          }
+        }
+      })
+    );
+
+    const response = await api.smartMessageBulkSend({
+      templateSetCode: "template",
+      contextList: [{ userKey: "user-key", context: {} }]
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE"
+    });
+    expect(response).not.toMatchObject({ ok: true });
+  });
+});

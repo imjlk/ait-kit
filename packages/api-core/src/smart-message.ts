@@ -3,12 +3,12 @@ import { normalizeMessageRecipient, recipientIdentifierHeaders, type MessageReci
 import {
   clientError,
   httpStatusOk,
-  isUpstreamFailure,
-  nonNegativeIntegerOrUndefined,
   numberOrUndefined,
   objectOrSelf,
   readPathString,
   readPathValue,
+  readStrictNonNegativeIntState,
+  readStrictStringState,
   stringOrUndefined,
   upstreamFailureCode,
   upstreamFailureReason
@@ -109,6 +109,18 @@ export function bulkMessageUpstreamBody(body: Record<string, unknown>) {
   };
 }
 
+/**
+ * Envelope resultTypes that are a definite provider rejection of the send.
+ */
+const MESSAGE_FAILURE_RESULT_TYPES = new Set(["FAIL", "FAILED", "ERROR"]);
+
+/**
+ * Envelope resultTypes where the provider could not determine the outcome:
+ * the message may or may not have been delivered, so the result stays
+ * UNKNOWN instead of asserting a definite failure.
+ */
+const MESSAGE_OUTCOME_UNKNOWN_RESULT_TYPES = new Set(["NETWORK_ERROR", "TIMEOUT"]);
+
 export function normalizeMessageResponse(
   requestBody: Record<string, unknown>,
   upstream: unknown,
@@ -116,76 +128,193 @@ export function normalizeMessageResponse(
   now: () => number = Date.now
 ): SmartMessageResponse {
   const upstreamObject = objectOrSelf(upstream, {});
-  const resultType = readPathString(upstreamObject, ["resultType", "success.resultType", "data.resultType"]);
   const providerRequestId =
     readPathString(upstreamObject, ["providerRequestId", "requestId", "result.providerRequestId"]) ??
     stringOrUndefined(requestBody.providerRequestId);
-  const sentAt = messageSentAt(upstreamObject.sentAt, requestBody.requestedAt, now);
+  // Timestamp provenance: a confirmed send time (with the completion-clock
+  // fallback) is only computed on delivery-confirmed branches; failed and
+  // unknown outcomes keep provider/request-supplied times only.
+  const sentAtWithoutNow = messageSentAtWithoutNow(upstreamObject.sentAt, requestBody.requestedAt);
+  const confirmedSentAt = () => sentAtWithoutNow ?? now();
+
+  // Strict envelope classification: the resultType is only trusted as a
+  // real string, unknown values are never treated as success, and failure
+  // envelopes never lend their result to count-based evidence.
+  const envelopeResultType = readStrictStringState(upstream, [
+    "resultType",
+    "success.resultType",
+    "data.resultType"
+  ]);
+  const resultType = envelopeResultType.state === "present" ? envelopeResultType.value : undefined;
 
   if (!httpStatusOk(upstreamStatus)) {
+    // 4xx: the provider definitely rejected the send. 5xx: the outcome is
+    // unknown — the request may or may not have been delivered.
+    const unknown = Number(upstreamStatus) >= 500;
     return {
       ok: false,
       providerRequestId,
-      providerStatus: "FAILED",
+      providerStatus: unknown ? "UNKNOWN" : "FAILED",
       resultType,
-      sentAt,
+      sentAt: sentAtWithoutNow,
       failureReason: upstreamFailureReason(upstreamObject),
       providerErrorCode: upstreamFailureCode(upstreamObject),
       upstreamStatus
     };
   }
 
-  if (upstreamObject.providerStatus || (upstreamObject.status && !upstreamObject.resultType && !upstreamObject.result)) {
-    const providerStatus = upstreamObject.providerStatus ?? upstreamObject.status;
-    const providerStatusText = String(providerStatus);
-    const ok = typeof upstreamObject.ok === "boolean" ? upstreamObject.ok : messageStatusOk(providerStatus);
-    if (!ok) {
+  if (envelopeResultType.state === "invalid") {
+    return unknownMessageResult(
+      providerRequestId,
+      "resultType was not a string",
+      upstreamStatus
+    );
+  }
+  if (envelopeResultType.state === "present") {
+    if (MESSAGE_FAILURE_RESULT_TYPES.has(envelopeResultType.value)) {
       return {
         ok: false,
         providerRequestId,
-        providerStatus: providerStatusText,
-        sentAt,
-        failureReason: stringOrUndefined(upstreamObject.failureReason ?? upstreamObject.errorMessage ?? upstreamObject.message)
+        providerStatus: "FAILED",
+        resultType,
+        sentAt: sentAtWithoutNow,
+        failureReason: upstreamFailureReason(upstreamObject),
+        providerErrorCode: upstreamFailureCode(upstreamObject)
+      };
+    }
+    if (MESSAGE_OUTCOME_UNKNOWN_RESULT_TYPES.has(envelopeResultType.value)) {
+      return unknownMessageResult(
+        providerRequestId,
+        upstreamFailureReason(upstreamObject),
+        upstreamStatus,
+        resultType,
+        upstreamFailureCode(upstreamObject)
+      );
+    }
+    if (envelopeResultType.value !== "SUCCESS") {
+      return unknownMessageResult(
+        providerRequestId,
+        `unrecognized resultType for message send: ${envelopeResultType.value}`,
+        upstreamStatus,
+        resultType
+      );
+    }
+  }
+
+  // Already-normalized responses (this module's own providerStatus
+  // vocabulary) arrive without an envelope; they are validated under their
+  // own explicit rule instead of bypassing the evidence checks: only the
+  // statuses this module emits are accepted, and a contradictory ok field
+  // invalidates the input.
+  if (
+    envelopeResultType.state === "absent" &&
+    !upstreamObject.result &&
+    (upstreamObject.providerStatus !== undefined || upstreamObject.status !== undefined)
+  ) {
+    const normalizedStatus = readStrictStringState(upstream, ["providerStatus", "status"]);
+    if (normalizedStatus.state !== "present") {
+      return unknownMessageResult(providerRequestId, "providerStatus was not a string", upstreamStatus);
+    }
+    const status = normalizedStatus.value.toUpperCase();
+    if (status !== "SENT" && status !== "FAILED") {
+      return unknownMessageResult(
+        providerRequestId,
+        `unrecognized normalized providerStatus: ${normalizedStatus.value}`,
+        upstreamStatus
+      );
+    }
+    const okField = upstreamObject.ok;
+    if (okField !== undefined && typeof okField !== "boolean") {
+      return unknownMessageResult(providerRequestId, "ok field was not a boolean", upstreamStatus);
+    }
+    if (okField !== undefined && okField !== (status === "SENT")) {
+      return unknownMessageResult(
+        providerRequestId,
+        `contradictory ok field for providerStatus ${normalizedStatus.value}`,
+        upstreamStatus
+      );
+    }
+    if (status !== "SENT") {
+      return {
+        ok: false,
+        providerRequestId,
+        providerStatus: normalizedStatus.value,
+        sentAt: sentAtWithoutNow,
+        failureReason: stringOrUndefined(
+          upstreamObject.failureReason ?? upstreamObject.errorMessage ?? upstreamObject.message
+        )
       };
     }
     return {
       ok: true,
       providerRequestId,
-      providerStatus: providerStatusText,
-      sentAt
+      providerStatus: normalizedStatus.value,
+      sentAt: confirmedSentAt()
     };
   }
 
-  const result = objectOrSelf(
-    readPathValue(upstreamObject, ["result", "success.result", "success", "data.result", "data.success"]),
-    {}
-  );
+  // Official SUCCESS envelope (or a bare official shape): the send result
+  // must actually be present. Counts are strict non-negative integers — a
+  // wrong-typed count invalidates the evidence, and a result object with
+  // neither counts nor failure entries is an unconfirmed outcome.
+  const nestedResult = readPathValue(upstreamObject, [
+    "result",
+    "success.result",
+    "success",
+    "data.result",
+    "data.success"
+  ]);
+  const result = objectOrSelf(nestedResult, {});
+  const countsSource =
+    nestedResult !== undefined || !hasTopLevelCountEvidence(upstreamObject) ? result : upstreamObject;
 
-  if (isUpstreamFailure(upstreamObject)) {
-    return {
-      ok: false,
-      providerRequestId,
-      providerStatus: "FAILED",
-      resultType,
-      sentAt,
-      failureReason: upstreamFailureReason(upstreamObject),
-      providerErrorCode: upstreamFailureCode(upstreamObject)
-    };
+  const countReads = {
+    msgCount: readStrictNonNegativeIntState(countsSource, ["msgCount"]),
+    sentPushCount: readStrictNonNegativeIntState(countsSource, ["sentPushCount"]),
+    sentInboxCount: readStrictNonNegativeIntState(countsSource, ["sentInboxCount"]),
+    sentSmsCount: readStrictNonNegativeIntState(countsSource, ["sentSmsCount"]),
+    sentAlimtalkCount: readStrictNonNegativeIntState(countsSource, ["sentAlimtalkCount"]),
+    sentFriendtalkCount: readStrictNonNegativeIntState(countsSource, ["sentFriendtalkCount"])
+  };
+  for (const [name, read] of Object.entries(countReads)) {
+    if (read.state === "invalid") {
+      return unknownMessageResult(providerRequestId, `${name} was not a non-negative integer`, upstreamStatus, resultType);
+    }
   }
+  const msgCount = countReads.msgCount.state === "present" ? countReads.msgCount.value : undefined;
+  const sentPushCount =
+    countReads.sentPushCount.state === "present" ? countReads.sentPushCount.value : undefined;
+  const sentInboxCount =
+    countReads.sentInboxCount.state === "present" ? countReads.sentInboxCount.value : undefined;
+  const sentSmsCount =
+    countReads.sentSmsCount.state === "present" ? countReads.sentSmsCount.value : undefined;
+  const sentAlimtalkCount =
+    countReads.sentAlimtalkCount.state === "present" ? countReads.sentAlimtalkCount.value : undefined;
+  const sentFriendtalkCount =
+    countReads.sentFriendtalkCount.state === "present" ? countReads.sentFriendtalkCount.value : undefined;
 
-  const msgCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["msgCount"]));
-  const sentPushCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["sentPushCount"]));
-  const sentInboxCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["sentInboxCount"]));
-  const sentSmsCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["sentSmsCount"]));
-  const sentAlimtalkCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["sentAlimtalkCount"]));
-  const sentFriendtalkCount = nonNegativeIntegerOrUndefined(readPathValue(result, ["sentFriendtalkCount"]));
   const failures = collectMessageFailures(result);
-  const contentIds = collectMessageContentIds(objectOrSelf(result, {}).detail);
+  const contentIds = collectMessageContentIds(result.detail);
+  const hasCountEvidence = Object.values(countReads).some((read) => read.state === "present");
+  if (!hasCountEvidence && failures.length === 0) {
+    // Empty objects, HTML error pages (parsed to { raw }), and SUCCESS
+    // envelopes without a send-result object: nothing confirms delivery.
+    return unknownMessageResult(
+      providerRequestId,
+      "response carried no send-result evidence (no counts, no failure entries)",
+      upstreamStatus,
+      resultType
+    );
+  }
+
   const channelSentCount = [sentPushCount, sentInboxCount, sentSmsCount, sentAlimtalkCount, sentFriendtalkCount]
     .filter((value) => value !== undefined)
     .reduce((a, b) => Number(a) + Number(b), 0);
   const sentCount = Math.max(msgCount ?? 0, channelSentCount);
   const failureReason = firstMessageFailureReason(failures);
+  // With evidence guaranteed above, a definite failure requires an actual
+  // zero-send outcome with failure entries — an absent failure list alone
+  // never decides the outcome.
   const providerStatus = sentCount > 0 || failures.length === 0 ? "SENT" : "FAILED";
   if (providerStatus === "FAILED") {
     return {
@@ -193,7 +322,7 @@ export function normalizeMessageResponse(
       providerRequestId,
       providerStatus,
       resultType,
-      sentAt,
+      sentAt: sentAtWithoutNow,
       failureReason,
       msgCount: msgCount ?? (sentCount > 0 ? sentCount : undefined),
       sentPushCount,
@@ -201,8 +330,8 @@ export function normalizeMessageResponse(
       sentSmsCount,
       sentAlimtalkCount,
       sentFriendtalkCount,
-      detail: objectOrSelf(result, {}).detail,
-      fail: objectOrSelf(result, {}).fail,
+      detail: result.detail,
+      fail: result.fail,
       failures: failures.length > 0 ? failures : undefined,
       contentIds: contentIds.length > 0 ? contentIds : undefined
     };
@@ -213,18 +342,50 @@ export function normalizeMessageResponse(
     providerRequestId,
     providerStatus,
     resultType,
-    sentAt,
+    sentAt: confirmedSentAt(),
     msgCount: msgCount ?? (sentCount > 0 ? sentCount : undefined),
     sentPushCount,
     sentInboxCount,
     sentSmsCount,
     sentAlimtalkCount,
     sentFriendtalkCount,
-    detail: objectOrSelf(result, {}).detail,
-    fail: objectOrSelf(result, {}).fail,
+    detail: result.detail,
+    fail: result.fail,
     failures: failures.length > 0 ? failures : undefined,
     contentIds: contentIds.length > 0 ? contentIds : undefined
   };
+}
+
+/**
+ * A result whose delivery outcome could not be determined. `providerStatus:
+ * "UNKNOWN"` (plus the internal `error: "INVALID_RESPONSE"` marker for
+ * uninterpretable bodies) tells callers to resolve the state out of band;
+ * it never asserts the message was not sent, never fabricates a sentAt,
+ * and never triggers an automatic resend.
+ */
+function unknownMessageResult(
+  providerRequestId: string | undefined,
+  failureReason: string,
+  upstreamStatus?: number,
+  resultType?: string,
+  providerErrorCode?: string
+): SmartMessageResponse {
+  return {
+    ok: false,
+    providerRequestId,
+    providerStatus: "UNKNOWN",
+    error: "INVALID_RESPONSE",
+    resultType,
+    failureReason,
+    ...(providerErrorCode !== undefined ? { providerErrorCode } : {}),
+    ...(upstreamStatus !== undefined ? { upstreamStatus } : {})
+  };
+}
+
+function hasTopLevelCountEvidence(value: Record<string, unknown>) {
+  return ["msgCount", "sentPushCount", "sentInboxCount", "sentSmsCount", "sentAlimtalkCount", "sentFriendtalkCount"].some(
+    (key) => value[key] !== undefined
+  );
 }
 
 function stubSmartMessageResponse(body: unknown, msgCount: number, now: () => number): SmartMessageResponse {
@@ -279,6 +440,17 @@ function messageSentAt(upstreamSentAt: unknown, requestSentAt: unknown, now: () 
   return upstreamTimestamp ?? requestTimestamp ?? now();
 }
 
+/**
+ * Timestamp provenance for outcomes that were not confirmed as sent: only
+ * provider-supplied or caller-requested times are kept — the current clock
+ * is never used to fabricate a send time for a failed or unknown result.
+ */
+function messageSentAtWithoutNow(upstreamSentAt: unknown, requestSentAt: unknown) {
+  const upstreamTimestamp = upstreamSentAt === undefined || upstreamSentAt === null ? undefined : numberOrUndefined(upstreamSentAt);
+  const requestTimestamp = requestSentAt === undefined || requestSentAt === null ? undefined : numberOrUndefined(requestSentAt);
+  return upstreamTimestamp ?? requestTimestamp;
+}
+
 const MESSAGE_RESULT_CHANNELS = ["sentPush", "sentInbox", "sentSms", "sentAlimtalk", "sentFriendtalk"];
 
 function collectMessageFailures(result: unknown) {
@@ -322,9 +494,4 @@ function firstMessageFailureReason(failures: Array<{ reachedFailReason?: string 
     if (failure.reachedFailReason) return failure.reachedFailReason;
   }
   return undefined;
-}
-
-function messageStatusOk(status: unknown) {
-  const normalized = String(status ?? "").trim().toUpperCase();
-  return !["FAILED", "FAIL", "ERROR", "REJECTED"].includes(normalized);
 }

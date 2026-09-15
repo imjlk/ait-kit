@@ -23,7 +23,14 @@ asked. Grant decisions must gate on `verified`, never on `ok`:
 - `ok: true` — the `get-order-status` query succeeded and the provider
   returned a well-formed payload. A payload missing the spec-required
   `orderId` or `status` fails with `error: "INVALID_RESPONSE"` instead of
-  being patched up from the request.
+  being patched up from the request. Evidence fields must be real strings:
+  an `orderId`, `status`, or present optional field (`sku`,
+  `statusDeterminedAt`, `reason`) arriving as an array, object, number, or
+  boolean is `INVALID_RESPONSE` too — coerced values are never used as
+  verification evidence. Failure envelopes (`FAIL`, `ERROR`,
+  `NETWORK_ERROR`, `TIMEOUT`) yield no evidence even when a contradictory
+  `success` payload rides along, and unrecognized `resultType` values are
+  `INVALID_RESPONSE`, never optimistic successes.
 - `verified: true` — the provider-attested status is `PAYMENT_COMPLETED` or
   `PURCHASED` **and** the provider-returned `orderId` matches the request.
   Response `orderId`/`sku` come exclusively from the provider payload;
@@ -45,6 +52,21 @@ asked. Grant decisions must gate on `verified`, never on `ok`:
   flows that want to exercise grant logic must explicitly opt in by checking
   `stub: true`.
 
+Grant gating example — `verified` alone confirms a payable order for the
+requested order ID; when your catalog expects a specific product, also
+require the SKU comparison before crediting:
+
+```ts
+const result = await tossApi.iapOrderStatus({ orderId, sku: "SKU_100_COINS" });
+
+// verified: provider attests a payable status for THIS order.
+// skuCheck: the product evidence matches what the caller expects.
+const grantable =
+  result.verified === true && !result.stub && result.skuCheck?.status === "MATCHED";
+// NOT_PROVIDED means the provider omitted SKU evidence: the order is paid,
+// but which product it bought is unconfirmed — decide explicitly.
+```
+
 ## Message recipients
 
 `normalizeMessageRecipient` turns legacy `{ userKey, tossUserKey, anonKey }`
@@ -61,6 +83,32 @@ stub and forward mode. Each API converts the recipient itself:
   define; consumer proxy code that rewrote the header can now be removed.)
 - **Bulk sends** carry recipients in `contextList` body fields (`userKey` /
   `anonKey`), never in headers.
+
+## Smart message send results
+
+`smartMessageSend` / `smartMessageBulkSend` only report success from
+send-result evidence the provider actually returned. `providerStatus`
+carries three meanings:
+
+- `"SENT"` — the send result contained real counts (an explicit `msgCount`
+  of `0` included) or channel counts confirming delivery.
+- `"FAILED"` — a definite failure: explicit failure entries on a zero-send
+  result, a `FAIL`/`ERROR` envelope, or a 4xx rejection. `providerErrorCode`
+  mirrors a code the provider returned; channel results, failure reasons,
+  and `contentIds` are preserved for partial successes.
+- `"UNKNOWN"` — the outcome could not be determined: an evidence-free body
+  (empty object, HTML error page, `SUCCESS` envelope without a send
+  result), wrong-typed counts, an unrecognized or outcome-ambiguous
+  `resultType` (`NETWORK_ERROR`, `TIMEOUT`), or a 5xx response. These
+  carry the internal `error: "INVALID_RESPONSE"` marker (parse/validation)
+  and keep `providerRequestId` correlation, but never a fabricated
+  `sentAt`. The message may or may not have been delivered: resolve the
+  state out of band — do not assert non-delivery and do not auto-resend on
+  this signal alone.
+
+The same evidence rule applies to single and bulk sends, and to
+already-normalized responses (only this module's own `SENT`/`FAILED`
+vocabulary round-trips; anything else is `UNKNOWN`).
 
 ## Anonymous keys and verification
 

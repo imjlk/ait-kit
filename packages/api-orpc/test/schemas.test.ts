@@ -93,4 +93,28 @@ describe("@ait-kit/api-orpc schemas", () => {
       }).success
     ).toBe(false);
   });
+
+  test("carries the internal error marker for unconfirmed message results", () => {
+    const unknown = smartMessageOutputSchema.parse({
+      ok: false,
+      providerRequestId: "request-id",
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE",
+      failureReason: "response carried no send-result evidence (no counts, no failure entries)"
+    });
+
+    expect(unknown).toMatchObject({
+      ok: false,
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE",
+      providerRequestId: "request-id"
+    });
+    expect(
+      smartMessageOutputSchema.safeParse({
+        ok: true,
+        providerStatus: "SENT",
+        error: "INVALID_RESPONSE"
+      }).success
+    ).toBe(false);
+  });
 });
