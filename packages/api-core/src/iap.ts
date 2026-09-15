@@ -14,6 +14,8 @@ import {
   TOSS_ENDPOINTS,
   type IapOrderStatusInput,
   type IapOrderStatusResponse,
+  type IapOrderUnverifiedResponse,
+  type IapOrderVerifiedResponse,
   type IapVerificationCode,
   type NormalizedAppsInTossCoreOptions
 } from "./types";
@@ -129,19 +131,31 @@ export function normalizeIapOrderStatusResponse(
     };
   }
 
+  // Verification ties the provider payload to the caller's expectation; a
+  // missing requested order ID cannot confirm anything (defensive for direct
+  // normalizeIapOrderStatusResponse callers — the forward path validates it).
+  const requestedOrderId = stringOrUndefined(request.orderId);
+  if (!requestedOrderId) {
+    return {
+      ok: false,
+      orderId: providerOrderId,
+      providerStatus: "ERROR",
+      error: "MISSING_ORDER_ID",
+      failureReason: "order status verification requires a requested orderId",
+      upstreamStatus
+    };
+  }
+
   // SKU evidence comes from the provider response only; it is optional per the
   // official API and its absence never flips `verified` on a payable status.
   const providerSku = readPathString(order, ["sku", "success.sku", "data.sku"]);
   const expectedSku = stringOrUndefined(request.sku);
 
-  const requestedOrderId = stringOrUndefined(request.orderId);
-  const orderIdMatches = requestedOrderId === undefined || providerOrderId === requestedOrderId;
+  const orderIdMatches = providerOrderId === requestedOrderId;
   const payable = PAYABLE_IAP_ORDER_STATUSES.has(providerStatus);
-  const verified = payable && orderIdMatches;
 
-  const response: Extract<IapOrderStatusResponse, { ok: true }> = {
-    ok: true,
-    verified,
+  const shared = {
+    ok: true as const,
     orderId: providerOrderId,
     providerStatus,
     statusDeterminedAt: readPathString(order, [
@@ -151,21 +165,35 @@ export function normalizeIapOrderStatusResponse(
     ]),
     reason: readPathString(order, ["reason", "success.reason", "data.reason"])
   };
-  if (providerSku !== undefined) {
-    response.sku = providerSku;
+
+  if (payable && orderIdMatches) {
+    const response: IapOrderVerifiedResponse = { ...shared, verified: true };
+    if (providerSku !== undefined) response.sku = providerSku;
+    const check = skuCheck(providerSku, expectedSku);
+    if (check) response.skuCheck = check;
+    return response;
   }
-  if (!verified) {
-    response.verificationCode = orderIdMatches
+
+  const response: IapOrderUnverifiedResponse = {
+    ...shared,
+    verified: false,
+    verificationCode: orderIdMatches
       ? (VERIFICATION_CODES_BY_PROVIDER_STATUS[providerStatus] ?? "UNKNOWN_STATUS")
-      : "ORDER_ID_MISMATCH";
-  }
-  if (expectedSku !== undefined) {
-    response.skuCheck =
-      providerSku === undefined
-        ? { status: "NOT_PROVIDED" }
-        : { status: providerSku === expectedSku ? "MATCHED" : "MISMATCHED", providerSku };
-  }
+      : "ORDER_ID_MISMATCH"
+  };
+  if (providerSku !== undefined) response.sku = providerSku;
+  const check = skuCheck(providerSku, expectedSku);
+  if (check) response.skuCheck = check;
   return response;
+}
+
+function skuCheck(
+  providerSku: string | undefined,
+  expectedSku: string | undefined
+): IapOrderVerifiedResponse["skuCheck"] {
+  if (expectedSku === undefined) return undefined;
+  if (providerSku === undefined) return { status: "NOT_PROVIDED" };
+  return { status: providerSku === expectedSku ? "MATCHED" : "MISMATCHED", providerSku };
 }
 
 function stubIapOrderStatus(body: IapOrderStatusInput): IapOrderStatusResponse {
@@ -174,12 +202,14 @@ function stubIapOrderStatus(body: IapOrderStatusInput): IapOrderStatusResponse {
   if (!orderId) {
     return { ok: false, error: "MISSING_ORDER_ID", providerStatus: "ERROR" };
   }
-  // Synthetic development data. The stub marker keeps this output from being
-  // mistaken for provider verification evidence.
+  // Synthetic development data: never verified, so an omitted mode setting can
+  // never turn fabricated orders into grantable ones. Development flows that
+  // want to exercise grant logic must opt in by checking `stub: true`.
   const expectedSku = stringOrUndefined(request.sku);
-  const response: Extract<IapOrderStatusResponse, { ok: true }> = {
+  const response: IapOrderUnverifiedResponse = {
     ok: true,
-    verified: true,
+    verified: false,
+    verificationCode: "STUB_EVIDENCE",
     orderId,
     providerStatus: "PAYMENT_COMPLETED",
     statusDeterminedAt: new Date(0).toISOString(),

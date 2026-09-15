@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createAppsInTossApiRpc,
   createAppsInTossApi,
+  normalizeIapOrderStatusResponse,
   normalizeMessageResponse,
   TOSS_ENDPOINTS,
   type MtlsClient
@@ -386,12 +387,26 @@ describe("@ait-kit/api-core", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      verified: true,
+      verified: false,
+      verificationCode: "STUB_EVIDENCE",
       orderId: "order-id",
       providerStatus: "PAYMENT_COMPLETED",
       sku: "expected-sku",
       skuCheck: { status: "MATCHED", providerSku: "expected-sku" },
       stub: true
+    });
+  });
+
+  test("requires a requested order ID when normalizing directly", () => {
+    const response = normalizeIapOrderStatusResponse(
+      {},
+      { resultType: "SUCCESS", success: { orderId: "provider-order", status: "PAYMENT_COMPLETED" } }
+    );
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: "MISSING_ORDER_ID",
+      orderId: "provider-order"
     });
   });
 

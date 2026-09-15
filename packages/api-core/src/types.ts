@@ -153,10 +153,52 @@ export type IapVerificationCode =
   | "ORDER_NOT_FOUND" // NOT_FOUND (retryable per the pending re-query flow)
   | "ORDER_ID_MISMATCH" // provider-returned orderId differs from the request
   | "UNKNOWN_STATUS" // status outside the documented provider enum
-  | "PROVIDER_STATUS_ERROR"; // ERROR
+  | "PROVIDER_STATUS_ERROR" // ERROR
+  | "STUB_EVIDENCE"; // synthetic stub output; never provider evidence
 
 /** Outcome of comparing the caller's expected SKU with provider evidence. */
 export type IapSkuCheckStatus = "MATCHED" | "MISMATCHED" | "NOT_PROVIDED";
+
+/** Shared evidence fields for both verified and unverified query successes. */
+interface IapOrderStatusSuccess {
+  /** The provider status query succeeded with a valid payload. */
+  ok: true;
+  /**
+   * Order ID exactly as returned by the provider. Never copied from the
+   * request; a payload without it fails with `error: "INVALID_RESPONSE"`.
+   */
+  orderId: string;
+  /**
+   * Product SKU exactly as returned by the provider. Never backfilled
+   * from the request expectation.
+   */
+  sku?: string;
+  providerStatus: string;
+  statusDeterminedAt?: string;
+  reason?: string;
+  attempts?: number;
+  /**
+   * Present exactly when the caller supplied an expected SKU.
+   * `providerSku` mirrors `sku` for convenience.
+   */
+  skuCheck?: {
+    status: IapSkuCheckStatus;
+    providerSku?: string;
+  };
+  /** Synthetic stub-mode output; never present in forward mode. */
+  stub?: true;
+}
+
+/** Provider evidence confirms a payable purchase for the requested order. */
+export interface IapOrderVerifiedResponse extends IapOrderStatusSuccess {
+  verified: true;
+}
+
+/** The queried order did not verify as payable; `verificationCode` says why. */
+export interface IapOrderUnverifiedResponse extends IapOrderStatusSuccess {
+  verified: false;
+  verificationCode: IapVerificationCode;
+}
 
 /**
  * Result of the in-app-purchase order status query.
@@ -165,7 +207,8 @@ export type IapSkuCheckStatus = "MATCHED" | "MISMATCHED" | "NOT_PROVIDED";
  * well-formed, provider-attested payload. `verified` means the provider
  * evidence confirms the requested order reached a payable status
  * (`PAYMENT_COMPLETED` or `PURCHASED`) with a matching order ID. Granting
- * decisions must gate on `verified`, not on `ok`.
+ * decisions must gate on `verified`, not on `ok`. Stub-mode output is never
+ * verified; it reports `verificationCode: "STUB_EVIDENCE"` with `stub: true`.
  *
  * Per the official API, the response `sku` and `statusDeterminedAt` are
  * optional (omitted for `MINIAPP_MISMATCH`, `NOT_FOUND`, and `ERROR`), so a
@@ -175,38 +218,8 @@ export type IapSkuCheckStatus = "MATCHED" | "MISMATCHED" | "NOT_PROVIDED";
  * can only be retried through this same query.
  */
 export type IapOrderStatusResponse =
-  | {
-      /** The provider status query succeeded with a valid payload. */
-      ok: true;
-      /** Provider evidence confirms a payable purchase for the requested order. */
-      verified: boolean;
-      /**
-       * Order ID exactly as returned by the provider. Never copied from the
-       * request; a payload without it fails with `error: "INVALID_RESPONSE"`.
-       */
-      orderId: string;
-      /**
-       * Product SKU exactly as returned by the provider. Never backfilled
-       * from the request expectation.
-       */
-      sku?: string;
-      providerStatus: string;
-      statusDeterminedAt?: string;
-      reason?: string;
-      attempts?: number;
-      /** Present exactly when `verified` is false. */
-      verificationCode?: IapVerificationCode;
-      /**
-       * Present exactly when the caller supplied an expected SKU.
-       * `providerSku` mirrors `sku` for convenience.
-       */
-      skuCheck?: {
-        status: IapSkuCheckStatus;
-        providerSku?: string;
-      };
-      /** Synthetic stub-mode output; never present in forward mode. */
-      stub?: true;
-    }
+  | IapOrderVerifiedResponse
+  | IapOrderUnverifiedResponse
   | ProviderFailure;
 
 export interface PromotionRewardGrantInput {
