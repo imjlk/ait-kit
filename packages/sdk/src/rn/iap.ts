@@ -1,5 +1,5 @@
 import { createIapAdapter, type IapAdapterOptions, type IapRecoveryResult } from "../iap/adapter.js";
-import type { IapPlatformLoader, IapPlatformSdk } from "../iap/platform-contract.js";
+import type { IapPlatformLoader, PartialIapPlatformSdk } from "../iap/platform-contract.js";
 
 /**
  * IAP adapter for React Native over the official `@apps-in-toss/framework`
@@ -12,7 +12,7 @@ export interface ReactNativeIapOptions extends Omit<IapAdapterOptions, "loader">
    * (tests/consumers). Defaults to the lazy
    * `import("@apps-in-toss/framework")` loader.
    */
-  framework?: IapPlatformSdk | IapPlatformLoader;
+  framework?: PartialIapPlatformSdk | IapPlatformLoader;
 }
 
 export type ReactNativeIap = ReturnType<typeof createReactNativeIap>;
@@ -23,19 +23,19 @@ export function createReactNativeIap(options: ReactNativeIapOptions) {
     ? createDefaultRnIapLoader()
     : typeof options.framework === "function"
       ? options.framework
-      : async () => ({ available: true, module: options.framework as IapPlatformSdk });
+      : async () => ({ available: true, module: options.framework as PartialIapPlatformSdk });
   return createIapAdapter({ ...options, loader });
 }
 
 function createDefaultRnIapLoader(): IapPlatformLoader {
-  let cached: IapPlatformSdk | undefined;
+  let cached: PartialIapPlatformSdk | undefined;
   return async () => {
     if (cached) {
       return { available: true, module: cached };
     }
     try {
       const framework = (await import("@apps-in-toss/framework")) as {
-        IAP?: Partial<IapPlatformSdk>;
+        IAP?: PartialIapPlatformSdk;
       };
       const iap = framework.IAP;
       if (typeof iap !== "object" || iap === null) {
@@ -46,7 +46,7 @@ function createDefaultRnIapLoader(): IapPlatformLoader {
       }
       // Per-operation capability is validated at each call site: an
       // installed version may expose some IAP functions but not others.
-      cached = iap as IapPlatformSdk;
+      cached = iap;
       return { available: true, module: cached };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

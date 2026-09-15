@@ -28,7 +28,7 @@
  * ```
  */
 import { createIapAdapter, type IapAdapterOptions, type IapRecoveryResult } from "../iap/adapter.js";
-import type { IapPlatformLoader } from "../iap/platform-contract.js";
+import type { IapPlatformLoader, PartialIapPlatformSdk } from "../iap/platform-contract.js";
 import { createDefaultWebFrameworkLoader } from "./framework-loader.js";
 import type { WebIapFramework } from "./iap-contract.js";
 
@@ -38,7 +38,7 @@ export interface WebIapOptions extends Omit<IapAdapterOptions, "loader"> {
    * loader (tests/consumers). Defaults to the lazy
    * `import("@apps-in-toss/web-framework")` loader.
    */
-  framework?: WebIapFramework["IAP"] | IapPlatformLoader;
+  framework?: WebIapFramework["IAP"] | PartialIapPlatformSdk | IapPlatformLoader;
 }
 
 export type WebIap = ReturnType<typeof createWebIap>;
@@ -49,6 +49,6 @@ export function createWebIap(options: WebIapOptions) {
     ? createDefaultWebFrameworkLoader()
     : typeof options.framework === "function"
       ? options.framework
-      : async () => ({ available: true, module: options.framework as WebIapFramework["IAP"] });
+      : async () => ({ available: true, module: options.framework as PartialIapPlatformSdk });
   return createIapAdapter({ ...options, loader });
 }

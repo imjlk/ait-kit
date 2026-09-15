@@ -4,7 +4,7 @@ import type {
   IapPurchaseResult
 } from "../index.js";
 import { IapGrantCoordinator } from "./grant-coordinator.js";
-import { type IapPlatformLoader, type IapPlatformSdk } from "./platform-contract.js";
+import { type IapPlatformLoader, type PartialIapPlatformSdk } from "./platform-contract.js";
 import { runPurchaseFlow } from "./purchase-flow.js";
 
 export interface IapAdapterOptions {
@@ -54,7 +54,7 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
   const purchaseTimeoutMs = options.purchaseTimeoutMs ?? DEFAULT_PURCHASE_TIMEOUT_MS;
   const coordinator = new IapGrantCoordinator(options.grant);
 
-  const load = async (): Promise<IapPlatformSdk> => {
+  const load = async (): Promise<PartialIapPlatformSdk> => {
     const result = await options.loader();
     if (!result.available) {
       throw new SdkError("SDK_UNAVAILABLE", result.reason);
@@ -67,7 +67,7 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
    * IAP functions but not others, so a missing function is UNSUPPORTED only
    * when that specific operation is requested — never a blanket rejection.
    */
-  const ensureOperation = (fn: unknown, label: string) => {
+  const ensureOperation = <F extends (args: never) => unknown>(fn: F | undefined, label: string): F => {
     if (typeof fn !== "function") {
       throw new SdkError("UNSUPPORTED", `the installed IAP SDK does not expose ${label}`);
     }
@@ -75,20 +75,24 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
     if (typeof supported.isSupported === "function" && !supported.isSupported()) {
       throw new SdkError("UNSUPPORTED", `${label} is not supported on this app version`);
     }
+    return fn;
   };
 
   return {
     async getProductItemList() {
       const platform = await load();
-      ensureOperation(platform.getProductItemList, "getProductItemList");
-      return platform.getProductItemList();
+      const getProductItemList = ensureOperation(platform.getProductItemList, "getProductItemList");
+      return getProductItemList();
     },
 
     purchaseOneTime(sku: string) {
       return purchaseWithDeadline(async (platform, remainingMs) => {
-        ensureOperation(platform.createOneTimePurchaseOrder, "one-time purchases");
+        const startOrder = ensureOperation(
+          platform.createOneTimePurchaseOrder,
+          "one-time purchases"
+        );
         return await runPurchaseFlow({
-          platform,
+          startOrder,
           coordinator,
           sku,
           subscription: false,
@@ -99,9 +103,12 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
 
     purchaseSubscription(sku: string, offerId?: string) {
       return purchaseWithDeadline(async (platform, remainingMs) => {
-        ensureOperation(platform.createSubscriptionPurchaseOrder, "subscription purchases");
+        const startOrder = ensureOperation(
+          platform.createSubscriptionPurchaseOrder,
+          "subscription purchases"
+        );
         return await runPurchaseFlow({
-          platform,
+          startOrder,
           coordinator,
           sku,
           ...(offerId !== undefined ? { offerId } : {}),
@@ -113,13 +120,16 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
 
     async getPendingOrders() {
       const platform = await load();
-      ensureOperation(platform.getPendingOrders, "getPendingOrders");
-      return platform.getPendingOrders();
+      const getPendingOrders = ensureOperation(platform.getPendingOrders, "getPendingOrders");
+      return getPendingOrders();
     },
 
     async recoverPendingOrder(order: IapPendingOrder): Promise<IapRecoveryResult> {
       const platform = await load();
-      ensureOperation(platform.completeProductGrant, "completeProductGrant");
+      const completeProductGrant = ensureOperation(
+        platform.completeProductGrant,
+        "completeProductGrant"
+      );
       try {
         // Server grant confirmation first (deduped within this adapter's
         // scope); the completion notification follows only after it.
@@ -128,7 +138,7 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
         const reason = error instanceof Error ? error.message : String(error);
         return { status: "grant_failed", orderId: order.orderId, reason };
       }
-      const notified = await notifyGrantComplete(platform, order.orderId);
+      const notified = await notifyGrantComplete(completeProductGrant, order.orderId);
       if (!notified.ok) {
         return {
           status: "notify_failed",
@@ -149,7 +159,7 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
    * registers the purchase.
    */
   async function purchaseWithDeadline(
-    run: (platform: IapPlatformSdk, remainingMs: number) => Promise<IapPurchaseResult>
+    run: (platform: PartialIapPlatformSdk, remainingMs: number) => Promise<IapPurchaseResult>
   ): Promise<IapPurchaseResult> {
     const timedOut = (): IapPurchaseResult => ({
       status: "unknown",
@@ -168,7 +178,7 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
         resolve(null);
       }, purchaseTimeoutMs);
     });
-    let platform: IapPlatformSdk | null;
+    let platform: PartialIapPlatformSdk | null;
     try {
       platform = await Promise.race([
         load().then((loaded) => (cancelled ? null : loaded)),
@@ -188,12 +198,12 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
 }
 
 async function notifyGrantComplete(
-  platform: IapPlatformSdk,
+  completeProductGrant: NonNullable<PartialIapPlatformSdk["completeProductGrant"]>,
   orderId: string
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   let notified: boolean;
   try {
-    notified = await platform.completeProductGrant({ params: { orderId } });
+    notified = await completeProductGrant({ params: { orderId } });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return {

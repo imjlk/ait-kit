@@ -39,8 +39,17 @@ export interface IapPlatformSdk {
   >;
 }
 
+/**
+ * Injection surface: installed framework versions may expose only some IAP
+ * functions. The loaders accept any partial surface; the adapter gates each
+ * operation individually at call time.
+ */
+export type PartialIapPlatformSdk = {
+  [K in keyof IapPlatformSdk]?: IapPlatformSdk[K];
+};
+
 export type IapPlatformLoader = () => Promise<
-  { available: true; module: IapPlatformSdk } | { available: false; reason: string }
+  { available: true; module: PartialIapPlatformSdk } | { available: false; reason: string }
 >;
 
 export function toIapErrorMessage(error: unknown): string {

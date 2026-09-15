@@ -25,10 +25,11 @@ export class IapGrantCoordinator {
   /**
    * Runs (or joins) the grant for the target order. Resolves when the
    * consumer's callback resolves; rejects with the callback's error when it
-   * fails, leaving the order retryable. A duplicate call joins only when it
-   * describes the SAME target (sku and subscriptionId included): a
-   * conflicting duplicate rejects instead of silently inheriting another
-   * flow's grant.
+   * fails, leaving the order retryable. A duplicate joins only when it
+   * describes the same target: orderId and sku must match, and a caller
+   * that does not know the subscriptionId (pending-order recovery) may join
+   * a cached subscription grant. Explicitly conflicting duplicates reject
+   * instead of silently inheriting another flow's grant.
    */
   run(target: IapGrantTarget): Promise<void> {
     const conflict = (existing: IapGrantTarget) =>
@@ -36,7 +37,10 @@ export class IapGrantCoordinator {
         `conflicting grant target for order ${target.orderId}: already ${existing.sku !== target.sku ? `sku ${existing.sku}` : `subscriptionId ${existing.subscriptionId}`}, requested ${target.sku}`
       );
     const sameTarget = (existing: IapGrantTarget) =>
-      existing.sku === target.sku && existing.subscriptionId === target.subscriptionId;
+      existing.sku === target.sku &&
+      (target.subscriptionId === undefined ||
+        existing.subscriptionId === undefined ||
+        existing.subscriptionId === target.subscriptionId);
 
     const inFlight = this.inFlight.get(target.orderId);
     if (inFlight) {

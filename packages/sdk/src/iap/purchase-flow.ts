@@ -1,11 +1,12 @@
 import { runEventFlow } from "../event-flow.js";
-import type { IapPurchaseResult, IapPurchaseSuccessInfo } from "../index.js";
+import type {
+  IapOneTimePurchaseParams,
+  IapPurchaseResult,
+  IapPurchaseSuccessInfo,
+  IapSubscriptionPurchaseParams
+} from "../index.js";
 import { type IapGrantCoordinator } from "./grant-coordinator.js";
-import {
-  type IapPlatformSdk,
-  toIapErrorCode,
-  toIapErrorMessage
-} from "./platform-contract.js";
+import { toIapErrorCode, toIapErrorMessage } from "./platform-contract.js";
 
 type PurchaseFlowEvent =
   | { kind: "sdkSuccess"; data: IapPurchaseSuccessInfo }
@@ -13,7 +14,10 @@ type PurchaseFlowEvent =
   | { kind: "grantSettled"; orderId: string; ok: boolean };
 
 export interface PurchaseFlowOptions {
-  platform: IapPlatformSdk;
+  /** The platform's order-creation function (already capability-checked). */
+  startOrder:
+    | ((params: import("../index.js").IapOneTimePurchaseParams) => () => void)
+    | ((params: import("../index.js").IapSubscriptionPurchaseParams) => () => void);
   coordinator: IapGrantCoordinator;
   sku: string;
   offerId?: string;
@@ -43,7 +47,7 @@ export interface PurchaseFlowOptions {
  *   any terminal state are ignored.
  */
 export function runPurchaseFlow(options: PurchaseFlowOptions): Promise<IapPurchaseResult> {
-  const { platform, coordinator, sku, offerId, subscription, timeoutMs } = options;
+  const { startOrder, coordinator, sku, offerId, subscription, timeoutMs } = options;
 
   // Per-flow state, shared by the register callbacks and the reducer.
   let observedOrderId: string | undefined;
@@ -139,9 +143,7 @@ export function runPurchaseFlow(options: PurchaseFlowOptions): Promise<IapPurcha
         }
       };
 
-      return subscription
-        ? platform.createSubscriptionPurchaseOrder(params)
-        : platform.createOneTimePurchaseOrder(params);
+      return (startOrder as (params: IapOneTimePurchaseParams | IapSubscriptionPurchaseParams) => () => void)(params);
     },
     reduce: (event) => {
       switch (event.kind) {
@@ -157,20 +159,25 @@ export function runPurchaseFlow(options: PurchaseFlowOptions): Promise<IapPurcha
             return evaluate();
           }
           const code = toIapErrorCode(event.error);
-          if (confirmedOrderId !== undefined || observedOrderId !== undefined) {
-            // The server grant already ran (or is still running) for this
-            // order — an SDK error here is not a definitive failure. Report
-            // unknown so the caller verifies server-side instead of retrying
-            // into a second paid order.
+          if (
+            confirmedOrderId !== undefined ||
+            observedOrderId !== undefined ||
+            stashedSuccess !== undefined
+          ) {
+            // The order is already identified (grant ran, is running, or the
+            // success event named it) — an SDK error here is not a
+            // definitive failure. Report unknown so the caller verifies
+            // server-side instead of retrying into a second paid order.
             return {
               done: true,
               result: {
                 status: "unknown",
-                orderId: confirmedOrderId ?? observedOrderId,
-                ...(confirmedSubscriptionId !== undefined || observedSubscriptionId !== undefined
+                orderId: confirmedOrderId ?? observedOrderId ?? stashedSuccess?.orderId,
+                ...(confirmedSubscriptionId !== undefined ||
+                observedSubscriptionId !== undefined
                   ? { subscriptionId: confirmedSubscriptionId ?? observedSubscriptionId }
                   : {}),
-                reason: `SDK error after the grant started (${code ?? toIapErrorMessage(event.error)}); the order may already be granted — verify server-side and recover it via pending orders`
+                reason: `SDK error after the order was identified (${code ?? toIapErrorMessage(event.error)}); the order may already be granted — verify server-side and recover it via pending orders`
               }
             };
           }

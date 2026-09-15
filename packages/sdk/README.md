@@ -63,9 +63,13 @@ still be in progress; the client timeout does not cancel it.
 
 ### Duplicate grant control (client-side, scoped to one adapter)
 
-- Concurrent grants for the same order share one in-flight call.
-- A successfully granted order is reused within the adapter's scope (a
-  later recovery or duplicate success does not re-run your server call).
+- Concurrent grants for the same order share one in-flight call — only for
+  identical targets (same `orderId` and `sku`; callers that do not know the
+  `subscriptionId`, like pending-order recovery, may join a cached
+  subscription grant). Explicitly conflicting duplicates reject.
+- A successfully granted order is reused within the adapter's scope for the
+  same target (a later recovery or duplicate success does not re-run your
+  server call).
 - Failed grants are not cached — the next attempt retries for real.
 - This only reduces duplicate client work: **server-side grant idempotency
   is still mandatory** (verify the order, persist exactly once).

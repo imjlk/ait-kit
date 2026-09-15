@@ -524,6 +524,49 @@ describe("@ait-kit/sdk IAP adapters", () => {
     });
   });
 
+  test("reports unknown when an SDK error follows a stashed success event", async () => {
+    const fake = fakeIapPlatform();
+    const iap = createReactNativeIap({ framework: fake.platform, grant: async () => {} });
+
+    const promise = iap.purchaseOneTime("SKU_COINS");
+    await Bun.sleep(1);
+    const captured = fake.purchases[0];
+
+    // Success event first (parked), then the SDK errors before the grant.
+    captured.onEvent({ type: "success", data: successPayload("order-7") });
+    captured.onError({ code: "INTERNAL_ERROR", message: "late bridge failure" });
+
+    await expect(promise).resolves.toMatchObject({
+      status: "unknown",
+      orderId: "order-7",
+      reason: expect.stringContaining("verify server-side")
+    });
+  });
+
+  test("recovery joins a subscription grant without knowing the subscription id", async () => {
+    const fake = fakeIapPlatform();
+    const grants = grantTracker();
+    const iap = createReactNativeIap({ framework: fake.platform, grant: grants.callback });
+
+    // A subscription purchase grant confirms (and caches) with subscriptionId.
+    const purchase = iap.purchaseSubscription("SKU_SUB");
+    await Bun.sleep(1);
+    const captured = fake.purchases[0];
+    expect(await captured.processProductGrant({ orderId: "order-5", subscriptionId: "sub-5" })).toBe(true);
+    captured.onEvent({ type: "success", data: successPayload("order-5") });
+    await expect(purchase).resolves.toMatchObject({ status: "completed", orderId: "order-5" });
+
+    // Pending-order recovery knows only orderId + sku; it must join the
+    // cached grant instead of conflicting with it.
+    fake.setPendingOrders([
+      { orderId: "order-5", sku: "SKU_SUB", paymentCompletedDate: "2026-01-01T00:00:00Z" }
+    ]);
+    const { orders } = await iap.getPendingOrders();
+    const result = await iap.recoverPendingOrder(orders[0]);
+    expect(result).toEqual({ status: "completed", orderId: "order-5" });
+    expect(grants.calls).toHaveLength(1);
+  });
+
   test("lists products and reports unsupported operations", async () => {
     const fake = fakeIapPlatform();
     (fake.platform.getProductItemList as { isSupported?: () => boolean }).isSupported = () => false;
