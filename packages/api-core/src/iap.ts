@@ -136,16 +136,19 @@ export function normalizeIapOrderStatusResponse(
     };
   }
 
-  // The envelope resultType is classified strictly (a real string only).
-  // Recognized failure envelopes end the query without evidence; unknown
-  // resultTypes are uninterpretable, not optimistic successes.
-  const envelopeResultType = readStrictStringState(upstream, [
+  // The envelope resultType is classified strictly (a real string only)
+  // across EVERY alias: a present alias with the wrong type, or aliases
+  // that disagree (top-level SUCCESS with a nested FAIL), is invalid —
+  // the first-present value never hides a stated failure. Recognized
+  // failure envelopes end the query without evidence; unknown resultTypes
+  // are uninterpretable, not optimistic successes.
+  const envelopeResultType = readUniqueStrictString(upstream, [
     "resultType",
     "success.resultType",
     "data.resultType"
   ]);
   if (envelopeResultType.state === "invalid") {
-    return invalidIapResponse(request, "resultType was not a string", upstreamStatus);
+    return invalidIapResponse(request, envelopeResultType.reason, upstreamStatus);
   }
   if (envelopeResultType.state === "present") {
     if (IAP_QUERY_FAILURE_RESULT_TYPES.has(envelopeResultType.value)) {
@@ -272,6 +275,32 @@ export function normalizeIapOrderStatusResponse(
   const check = skuCheck(providerSku, expectedSku);
   if (check) response.skuCheck = check;
   return response;
+}
+
+
+/**
+ * Reads one logical value across several aliases strictly: every present
+ * alias must be a real string, and present aliases must agree after enum
+ * normalization (trim + case). The returned present value keeps the first
+ * alias's original bytes for surfacing; disagreements are invalid.
+ */
+function readUniqueStrictString(
+  value: unknown,
+  paths: string[]
+): { state: "present"; value: string } | { state: "absent" } | { state: "invalid"; reason: string } {
+  const reads = paths.map((p) => readStrictStringState(value, [p]));
+  for (const read of reads) {
+    if (read.state === "invalid") {
+      return { state: "invalid", reason: `${paths[reads.indexOf(read)]} was not a string` };
+    }
+  }
+  const present = reads.filter((read): read is { state: "present"; value: string } => read.state === "present");
+  if (present.length === 0) return { state: "absent" };
+  const normalized = new Set(present.map((read) => read.value.trim().toUpperCase()));
+  if (normalized.size > 1) {
+    return { state: "invalid", reason: "conflicting resultType aliases" };
+  }
+  return { state: "present", value: present[0].value };
 }
 
 function invalidIapResponse(

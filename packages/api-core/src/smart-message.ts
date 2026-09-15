@@ -109,6 +109,54 @@ export function bulkMessageUpstreamBody(body: Record<string, unknown>) {
   };
 }
 
+
+/**
+ * Reads one logical value across several aliases strictly: every present
+ * alias must be a real string, and present aliases must agree after enum
+ * normalization (trim + case). The returned present value keeps the first
+ * alias's original bytes for surfacing; disagreements are invalid.
+ */
+function readUniqueStrictString(
+  value: unknown,
+  paths: string[]
+): { state: "present"; value: string } | { state: "absent" } | { state: "invalid"; reason: string } {
+  const reads = paths.map((p) => readStrictStringState(value, [p]));
+  for (let index = 0; index < reads.length; index += 1) {
+    if (reads[index].state === "invalid") {
+      return { state: "invalid", reason: `${paths[index]} was not a string` };
+    }
+  }
+  const present = reads.filter((read): read is { state: "present"; value: string } => read.state === "present");
+  if (present.length === 0) return { state: "absent" };
+  const normalized = new Set(present.map((read) => read.value.trim().toUpperCase()));
+  if (normalized.size > 1) {
+    return { state: "invalid", reason: "conflicting resultType aliases" };
+  }
+  return { state: "present", value: present[0].value };
+}
+
+/**
+ * Reads the providerStatus/status alias pair next to a SUCCESS envelope:
+ * which present aliases state a failure, and whether the pair disagrees.
+ */
+function readStatedStatusAliases(
+  upstream: unknown
+): { state: "absent" } | { state: "invalid"; reason: string } | { state: "present"; failures: string[]; conflicting: boolean } {
+  const reads = [readStrictStringState(upstream, ["providerStatus"]), readStrictStringState(upstream, ["status"])];
+  for (let index = 0; index < reads.length; index += 1) {
+    if (reads[index].state === "invalid") {
+      return { state: "invalid", reason: `${index === 0 ? "providerStatus" : "status"} was not a string` };
+    }
+  }
+  const present = reads.filter((read): read is { state: "present"; value: string } => read.state === "present");
+  if (present.length === 0) return { state: "absent" };
+  const failures = present
+    .map((read) => read.value.trim().toUpperCase())
+    .filter((value) => STATED_FAILURE_STATUSES.has(value));
+  const normalized = new Set(present.map((read) => read.value.trim().toUpperCase()));
+  return { state: "present", failures, conflicting: normalized.size > 1 };
+}
+
 /**
  * Envelope resultTypes that are a definite provider rejection of the send.
  */
@@ -146,8 +194,9 @@ export function normalizeMessageResponse(
 
   // Strict envelope classification: the resultType is only trusted as a
   // real string, unknown values are never treated as success, and failure
-  // envelopes never lend their result to count-based evidence.
-  const envelopeResultType = readStrictStringState(upstream, [
+  // envelopes never lend their result to count-based evidence. Every
+  // alias must agree — a top-level SUCCESS never hides a nested FAIL.
+  const envelopeResultType = readUniqueStrictString(upstream, [
     "resultType",
     "success.resultType",
     "data.resultType"
@@ -199,7 +248,7 @@ export function normalizeMessageResponse(
   if (envelopeResultType.state === "invalid") {
     return unknownMessageResult(
       providerRequestId,
-      "resultType was not a string",
+      envelopeResultType.reason,
       upstreamStatus,
       undefined,
       undefined,
@@ -221,23 +270,38 @@ export function normalizeMessageResponse(
     // A provider-emitted failure status alongside a SUCCESS envelope is the
     // provider contradicting itself: the stated failure wins, exactly as it
     // did before envelope classification existed (messageStatusOk treated
-    // this same set — FAILED, FAIL, ERROR, REJECTED — as failures). Both
-    // normalized aliases (providerStatus and status) are honored.
-    const statedStatus = readStrictStringState(upstream, ["providerStatus", "status"]);
-    if (
-      envelopeResultType.value === "SUCCESS" &&
-      statedStatus.state === "present" &&
-      STATED_FAILURE_STATUSES.has(statedStatus.value.trim().toUpperCase())
-    ) {
-      return {
-        ok: false,
-        providerRequestId,
-        providerStatus: "FAILED",
-        resultType,
-        sentAt: sentAtWithoutNow,
-        failureReason: upstreamFailureReason(upstreamObject),
-        providerErrorCode: upstreamFailureCode(upstreamObject)
-      };
+    // this same set — FAILED, FAIL, ERROR, REJECTED — as failures). EVERY
+    // alias is checked, so neither a hidden failure nor a disagreement
+    // between aliases can be overridden by counts.
+    if (envelopeResultType.value === "SUCCESS") {
+      const stated = readStatedStatusAliases(upstream);
+      if (stated.state === "invalid") {
+        return unknownMessageResult(providerRequestId, stated.reason, upstreamStatus, resultType, undefined, sentAtWithoutNow);
+      }
+      if (
+        stated.state === "present" &&
+        stated.failures.length > 0
+      ) {
+        return {
+          ok: false,
+          providerRequestId,
+          providerStatus: "FAILED",
+          resultType,
+          sentAt: sentAtWithoutNow,
+          failureReason: upstreamFailureReason(upstreamObject),
+          providerErrorCode: upstreamFailureCode(upstreamObject)
+        };
+      }
+      if (stated.state === "present" && stated.conflicting) {
+        return unknownMessageResult(
+          providerRequestId,
+          "conflicting providerStatus and status aliases",
+          upstreamStatus,
+          resultType,
+          undefined,
+          sentAtWithoutNow
+        );
+      }
     }
     if (MESSAGE_OUTCOME_UNKNOWN_RESULT_TYPES.has(envelopeResultType.value)) {
       return unknownMessageResult(

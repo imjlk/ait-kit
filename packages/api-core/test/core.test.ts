@@ -2105,6 +2105,52 @@ describe("smart message send-result evidence validation", () => {
     });
   });
 
+  test.each([
+    [
+      "a nested FAIL resultType under a top-level SUCCESS",
+      { resultType: "SUCCESS", success: { resultType: "FAIL", orderId: "order-id", status: "PAYMENT_COMPLETED" } }
+    ]
+  ] as const)("never verifies IAP evidence with %s", (_label, upstream) => {
+    const response = normalizeIapOrderStatusResponse({ orderId: "order-id" }, upstream);
+
+    expect(response).toMatchObject({ ok: false, error: "INVALID_RESPONSE" });
+    expect(response).not.toMatchObject({ verified: true });
+  });
+
+  test("a SENT providerStatus cannot hide a FAILED status alias", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { providerStatus: "SENT", status: "FAILED", resultType: "SUCCESS", success: { msgCount: 1 } }
+    );
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "FAILED" });
+    expect(response).not.toMatchObject({ ok: true });
+  });
+
+  test("disagreeing non-failure status aliases invalidate the response", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { providerStatus: "SENT", status: "WEIRD", resultType: "SUCCESS", success: { msgCount: 1 } }
+    );
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE",
+      failureReason: expect.stringContaining("conflicting providerStatus and status aliases")
+    });
+  });
+
+  test("a nested FAIL resultType under a top-level SUCCESS never sends", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { resultType: "SUCCESS", success: { resultType: "FAIL", msgCount: 1 } }
+    );
+
+    expect(response).toMatchObject({ ok: false, error: "INVALID_RESPONSE" });
+    expect(response).not.toMatchObject({ ok: true });
+  });
+
   test("unknown results keep correlation info but never fabricate a sentAt", () => {
     const response = normalizeMessageResponse(
       { providerRequestId: "req-9" },
