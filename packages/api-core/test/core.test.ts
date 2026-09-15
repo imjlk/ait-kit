@@ -1813,6 +1813,37 @@ describe("IAP provider evidence type validation", () => {
     expect(wrongTypedSku).toMatchObject({ ok: false, error: "INVALID_RESPONSE" });
   });
 
+  test("an explicit ok:false wins over a SUCCESS envelope with payable evidence", () => {
+    const response = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      {
+        ok: false,
+        resultType: "SUCCESS",
+        success: { orderId: "order-id", status: "PAYMENT_COMPLETED" }
+      }
+    );
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "ERROR" });
+    expect(response).not.toMatchObject({ verified: true });
+  });
+
+  test("identifier evidence keeps the provider's exact bytes", () => {
+    // A whitespace-padded provider orderId is NOT the requested order:
+    // trimming is only used to reject blanks, never to create a match.
+    const padded = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: "SUCCESS", success: { orderId: " order-id ", status: "PAYMENT_COMPLETED" } }
+    );
+    expect(padded).toMatchObject({ ok: true, verified: false, verificationCode: "ORDER_ID_MISMATCH" });
+    expect(padded).not.toHaveProperty("verified", true);
+
+    const exact = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: "SUCCESS", success: { orderId: "order-id", status: "PURCHASED", sku: "sku-a" } }
+    );
+    expect(exact).toMatchObject({ ok: true, verified: true, sku: "sku-a" });
+  });
+
   test("network error responses keep the provider error code for diagnostics", () => {
     const response = normalizeIapOrderStatusResponse(
       { orderId: "order-id" },
@@ -1850,6 +1881,29 @@ describe("smart message send-result evidence validation", () => {
     } else {
       expect(response).toMatchObject({ providerStatus: "UNKNOWN" });
     }
+  });
+
+  test("an explicit ok:false wins over count evidence for messages", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { ok: false, resultType: "SUCCESS", success: { msgCount: 1 } }
+    );
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "FAILED" });
+    expect(response).not.toMatchObject({ ok: true });
+  });
+
+  test("unknown results keep supplied timestamps but never add clock ones", () => {
+    const response = normalizeMessageResponse(
+      { requestedAt: 777 },
+      { resultType: "TIMEOUT" },
+      200,
+      () => {
+        throw new Error("the clock must not be consulted for unknown results");
+      }
+    );
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "UNKNOWN", sentAt: 777 });
   });
 
   test("unknown results keep correlation info but never fabricate a sentAt", () => {

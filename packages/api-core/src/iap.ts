@@ -122,6 +122,20 @@ export function normalizeIapOrderStatusResponse(
 
   const upstreamObject = objectOrSelf(upstream, {});
 
+  // An explicit ok:false is a stated failure: it always wins over any
+  // resultType or success payload riding along (a SUCCESS envelope with
+  // ok:false is contradictory, not evidence).
+  if (upstreamObject.ok === false) {
+    return {
+      ok: false,
+      orderId: stringOrUndefined(request.orderId),
+      providerStatus: "ERROR",
+      failureReason: upstreamFailureReason(upstream),
+      providerErrorCode: upstreamFailureCode(upstream),
+      upstreamStatus
+    };
+  }
+
   // The envelope resultType is classified strictly (a real string only).
   // Recognized failure envelopes end the query without evidence; unknown
   // resultTypes are uninterpretable, not optimistic successes.
@@ -151,17 +165,6 @@ export function normalizeIapOrderStatusResponse(
         upstreamStatus
       );
     }
-  } else if (upstreamObject.ok === false) {
-    // Already-normalized failure input (no envelope): an explicit ok:false
-    // carries no evidence. It is honored as a failed query, but never
-    // produces a verdict of its own.
-    return {
-      ok: false,
-      orderId: stringOrUndefined(request.orderId),
-      providerStatus: "ERROR",
-      failureReason: upstreamFailureReason(upstream),
-      upstreamStatus
-    };
   }
 
   // With a SUCCESS envelope (or a legacy bare order object without one),

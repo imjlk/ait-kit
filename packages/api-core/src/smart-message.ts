@@ -163,11 +163,30 @@ export function normalizeMessageResponse(
     };
   }
 
+  // An explicit ok:false is a stated failure and always wins over count
+  // evidence or a SUCCESS envelope riding along — unless the response is
+  // an already-normalized one (it carries this module's providerStatus
+  // vocabulary), in which case the normalized branch validates the pair.
+  if (upstreamObject.ok === false && upstreamObject.providerStatus === undefined) {
+    return {
+      ok: false,
+      providerRequestId,
+      providerStatus: "FAILED",
+      resultType,
+      sentAt: sentAtWithoutNow,
+      failureReason: upstreamFailureReason(upstreamObject),
+      providerErrorCode: upstreamFailureCode(upstreamObject)
+    };
+  }
+
   if (envelopeResultType.state === "invalid") {
     return unknownMessageResult(
       providerRequestId,
       "resultType was not a string",
-      upstreamStatus
+      upstreamStatus,
+      undefined,
+      undefined,
+      sentAtWithoutNow
     );
   }
   if (envelopeResultType.state === "present") {
@@ -188,7 +207,8 @@ export function normalizeMessageResponse(
         upstreamFailureReason(upstreamObject),
         upstreamStatus,
         resultType,
-        upstreamFailureCode(upstreamObject)
+        upstreamFailureCode(upstreamObject),
+        sentAtWithoutNow
       );
     }
     if (envelopeResultType.value !== "SUCCESS") {
@@ -196,7 +216,9 @@ export function normalizeMessageResponse(
         providerRequestId,
         `unrecognized resultType for message send: ${envelopeResultType.value}`,
         upstreamStatus,
-        resultType
+        resultType,
+        undefined,
+        sentAtWithoutNow
       );
     }
   }
@@ -213,25 +235,45 @@ export function normalizeMessageResponse(
   ) {
     const normalizedStatus = readStrictStringState(upstream, ["providerStatus", "status"]);
     if (normalizedStatus.state !== "present") {
-      return unknownMessageResult(providerRequestId, "providerStatus was not a string", upstreamStatus);
+      return unknownMessageResult(
+        providerRequestId,
+        "providerStatus was not a string",
+        upstreamStatus,
+        undefined,
+        undefined,
+        sentAtWithoutNow
+      );
     }
     const status = normalizedStatus.value.toUpperCase();
     if (status !== "SENT" && status !== "FAILED") {
       return unknownMessageResult(
         providerRequestId,
         `unrecognized normalized providerStatus: ${normalizedStatus.value}`,
-        upstreamStatus
+        upstreamStatus,
+        undefined,
+        undefined,
+        sentAtWithoutNow
       );
     }
     const okField = upstreamObject.ok;
     if (okField !== undefined && typeof okField !== "boolean") {
-      return unknownMessageResult(providerRequestId, "ok field was not a boolean", upstreamStatus);
+      return unknownMessageResult(
+        providerRequestId,
+        "ok field was not a boolean",
+        upstreamStatus,
+        undefined,
+        undefined,
+        sentAtWithoutNow
+      );
     }
     if (okField !== undefined && okField !== (status === "SENT")) {
       return unknownMessageResult(
         providerRequestId,
         `contradictory ok field for providerStatus ${normalizedStatus.value}`,
-        upstreamStatus
+        upstreamStatus,
+        undefined,
+        undefined,
+        sentAtWithoutNow
       );
     }
     if (status !== "SENT") {
@@ -278,7 +320,14 @@ export function normalizeMessageResponse(
   };
   for (const [name, read] of Object.entries(countReads)) {
     if (read.state === "invalid") {
-      return unknownMessageResult(providerRequestId, `${name} was not a non-negative integer`, upstreamStatus, resultType);
+      return unknownMessageResult(
+        providerRequestId,
+        `${name} was not a non-negative integer`,
+        upstreamStatus,
+        resultType,
+        undefined,
+        sentAtWithoutNow
+      );
     }
   }
   const msgCount = countReads.msgCount.state === "present" ? countReads.msgCount.value : undefined;
@@ -303,7 +352,9 @@ export function normalizeMessageResponse(
       providerRequestId,
       "response carried no send-result evidence (no counts, no failure entries)",
       upstreamStatus,
-      resultType
+      resultType,
+      undefined,
+      sentAtWithoutNow
     );
   }
 
@@ -368,7 +419,8 @@ function unknownMessageResult(
   failureReason: string,
   upstreamStatus?: number,
   resultType?: string,
-  providerErrorCode?: string
+  providerErrorCode?: string,
+  sentAt?: number
 ): SmartMessageResponse {
   return {
     ok: false,
@@ -378,7 +430,10 @@ function unknownMessageResult(
     resultType,
     failureReason,
     ...(providerErrorCode !== undefined ? { providerErrorCode } : {}),
-    ...(upstreamStatus !== undefined ? { upstreamStatus } : {})
+    ...(upstreamStatus !== undefined ? { upstreamStatus } : {}),
+    // Supplied (provider/request) timestamps survive as correlation data;
+    // only the clock fallback is withheld for unconfirmed outcomes.
+    ...(sentAt !== undefined ? { sentAt } : {})
   };
 }
 

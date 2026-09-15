@@ -214,14 +214,15 @@ export type StrictReadState<T> =
  * Strict string read for verification evidence: only a real, non-blank
  * string counts. Unlike {@link readPathString}, values are never coerced —
  * an array, object, number, or boolean at the path is `invalid`, never a
- * stringified stand-in.
+ * stringified stand-in. Trimming is used ONLY to reject blank strings:
+ * the returned value preserves the provider's original bytes, because
+ * identifier evidence is compared and surfaced exactly.
  */
 export function readStrictStringState(value: unknown, paths: string[]): StrictReadState<string> {
   const found = readPathValue(value, paths);
   if (found === undefined || found === null) return { state: "absent" };
   if (typeof found !== "string") return { state: "invalid" };
-  const trimmed = found.trim();
-  return trimmed ? { state: "present", value: trimmed } : { state: "invalid" };
+  return found.trim() ? { state: "present", value: found } : { state: "invalid" };
 }
 
 /**
