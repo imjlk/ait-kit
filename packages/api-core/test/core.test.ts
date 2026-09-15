@@ -1969,6 +1969,37 @@ describe("smart message send-result evidence validation", () => {
     expect(pending).toMatchObject({ ok: true, verified: false, verificationCode: "PAYMENT_INCOMPLETE" });
   });
 
+  test("a padded stated failure status next to a SUCCESS envelope still fails", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { providerStatus: " FAILED ", resultType: "SUCCESS", success: { msgCount: 1 } }
+    );
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "FAILED" });
+  });
+
+  test("a result-bearing ok:false body never becomes SENT", () => {
+    const response = normalizeMessageResponse(
+      {},
+      { ok: false, providerStatus: "FAILED", result: { msgCount: 1 } }
+    );
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "FAILED" });
+    expect(response).not.toMatchObject({ ok: true });
+  });
+
+  test("bare top-level failure entries without counts report a definite failure", () => {
+    const response = normalizeMessageResponse({}, {
+      fail: { sentInbox: [{ contentId: "inbox-1", reachedFailReason: "inbox unavailable" }] }
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "FAILED",
+      failureReason: "inbox unavailable"
+    });
+  });
+
   test("unknown results keep correlation info but never fabricate a sentAt", () => {
     const response = normalizeMessageResponse(
       { providerRequestId: "req-9" },

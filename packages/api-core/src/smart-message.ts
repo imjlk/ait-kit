@@ -180,7 +180,9 @@ export function normalizeMessageResponse(
   // validates as a pair — an envelope alongside ok:false is contradictory,
   // not a normalized shape.
   const isEnvelopeFreeNormalized =
-    envelopeResultType.state === "absent" && upstreamObject.providerStatus !== undefined;
+    envelopeResultType.state === "absent" &&
+    !upstreamObject.result &&
+    upstreamObject.providerStatus !== undefined;
   if (upstreamObject.ok === false && !isEnvelopeFreeNormalized) {
     return {
       ok: false,
@@ -223,7 +225,7 @@ export function normalizeMessageResponse(
     if (
       envelopeResultType.value === "SUCCESS" &&
       statedStatus.state === "present" &&
-      STATED_FAILURE_STATUSES.has(statedStatus.value.toUpperCase())
+      STATED_FAILURE_STATUSES.has(statedStatus.value.trim().toUpperCase())
     ) {
       return {
         ok: false,
@@ -342,7 +344,9 @@ export function normalizeMessageResponse(
   ]);
   const result = objectOrSelf(nestedResult, {});
   const countsSource =
-    nestedResult !== undefined || !hasTopLevelCountEvidence(upstreamObject) ? result : upstreamObject;
+    nestedResult !== undefined || !hasTopLevelSendEvidence(upstreamObject)
+      ? result
+      : upstreamObject;
 
   const countReads = {
     msgCount: readStrictNonNegativeIntState(countsSource, ["msgCount"]),
@@ -474,9 +478,11 @@ function unknownMessageResult(
   };
 }
 
-function hasTopLevelCountEvidence(value: Record<string, unknown>) {
-  return ["msgCount", "sentPushCount", "sentInboxCount", "sentSmsCount", "sentAlimtalkCount", "sentFriendtalkCount"].some(
-    (key) => value[key] !== undefined
+function hasTopLevelSendEvidence(value: Record<string, unknown>) {
+  return (
+    ["msgCount", "sentPushCount", "sentInboxCount", "sentSmsCount", "sentAlimtalkCount", "sentFriendtalkCount"].some(
+      (key) => value[key] !== undefined
+    ) || value.fail !== undefined
   );
 }
 
