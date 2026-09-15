@@ -22,6 +22,12 @@ export {
   type ReactNativeAdsOptions,
   type SdkAdType
 } from "./ads.js";
+export {
+  createReactNativeIap,
+  type ReactNativeIap,
+  type ReactNativeIapOptions
+} from "./iap.js";
+export type { IapRecoveryResult } from "./iap.js";
 export { createDefaultFrameworkLoader, type FrameworkLoader } from "./framework-loader.js";
 export type {
   FullScreenAdShowEvent,

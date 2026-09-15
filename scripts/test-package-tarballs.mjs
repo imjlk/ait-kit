@@ -65,8 +65,8 @@ try {
       exportPaths.push("./node");
     }
     if (manifest.name === "@ait-kit/sdk") {
-      // The React Native adapters must ship their own runtime + types entry.
-      exportPaths.push("./rn");
+      // Both platform adapters must ship their own runtime + types entries.
+      exportPaths.push("./rn", "./web");
     }
     for (const exportPath of exportPaths) {
       const importExport = manifest.exports?.[exportPath]?.import;
@@ -190,116 +190,168 @@ try {
     }
 
     if (packedPackage.hasRnExport) {
-      // /rn imports cleanly in plain Node without the official RN SDK: the
-      // framework is an optional peer and only imported lazily.
-      const rnSmokePath = join(installDir, "smoke-rn.mjs");
-      writeFileSync(rnSmokePath, `import ${JSON.stringify(`${packedPackage.name}/rn`)};\n`);
-      run(process.execPath, [rnSmokePath], installDir);
-
-      // RN consumer fixture: install the real tarball into a fresh project
-      // (still without @apps-in-toss/framework), then type-check and bundle
-      // a consumer of both entries.
-      const fixtureDir = join(installDir, "rn-fixture");
-      mkdirSync(fixtureDir, { recursive: true });
-      writeFileSync(join(fixtureDir, "package.json"), JSON.stringify({ private: true, type: "module" }));
-      writeFileSync(
-        join(fixtureDir, "consumer.ts"),
-        `import { SdkError, type AdShowResult } from ${JSON.stringify(packedPackage.name)};
-import { createReactNativeAds } from ${JSON.stringify(`${packedPackage.name}/rn`)};
-
-const result: AdShowResult = { status: "dismissed" };
-const ads = createReactNativeAds();
-
-export function consumerCheck(): string {
-  return result.status === "dismissed" ? new SdkError("UNSUPPORTED", "check").code : "impossible";
-}
-
-// The /rn entry must share the root entry's SdkError constructor: without
-// the externalized self-import, independently bundled entries would create
-// two classes and this check would be false.
+      // Per-platform fixtures: each installs the real tarball plus a stub of
+      // ONLY its own platform SDK, proving the two entries stay independent
+      // (an /rn consumer never needs the web SDK and vice versa, in JS or
+      // in the shipped declarations), then type-checks (bundler + NodeNext),
+      // bundles, and executes the consumer against the installed package.
+      const platforms = [
+        {
+          subpath: "rn",
+          platformPackage: "@apps-in-toss/framework",
+          externalFlag: "--external:@apps-in-toss/framework",
+          consumerImports: `import { createReactNativeAds, createReactNativeIap } from ${JSON.stringify(
+            `${packedPackage.name}/rn`
+          )};`,
+          consumerBody: `export const ads = createReactNativeAds();
+export const iap = createReactNativeIap({ grant: async () => {} });
 export async function crossEntryInstanceofCheck(): Promise<boolean> {
   try {
-    await ads.loadFullScreenAd("AD_GROUP_ID");
+    await iap.getPendingOrders();
     return false;
   } catch (error) {
     return error instanceof SdkError;
   }
 }
-export { ads };
+
+// Executed by the fixture runner: must hold against the installed tarball.
+if (!(await crossEntryInstanceofCheck())) {
+  throw new Error("cross-entry SdkError instanceof check failed");
+}
 `
-      );
-      run(
-        "npm",
-        [
-          "install",
-          "--ignore-scripts",
-          "--no-package-lock",
-          "--no-audit",
-          "--no-fund",
-          "--prefer-offline",
-          packedPackage.tarballPath,
-          "typescript@6.0.3",
-          "esbuild@0.28.2"
-        ],
-        fixtureDir,
-        installCommandTimeoutMs
-      );
-      run(
-        "npm",
-        [
-          "exec",
-          "--",
-          "tsc",
-          "--noEmit",
-          "--strict",
-          "--target",
-          "es2022",
-          "--module",
-          "esnext",
-          "--moduleResolution",
-          "bundler",
-          "consumer.ts"
-        ],
-        fixtureDir
-      );
-      run(
-        "npm",
-        [
-          "exec",
-          "--",
-          "esbuild",
-          "consumer.ts",
-          "--bundle",
-          "--format=esm",
-          "--platform=node",
-          "--external:@apps-in-toss/framework",
-          "--outfile=consumer.js"
-        ],
-        fixtureDir
-      );
-      // NodeNext consumers resolve the shipped declarations directly; the
-      // emitted d.ts must carry extension-safe specifiers.
-      run(
-        "npm",
-        [
-          "exec",
-          "--",
-          "tsc",
-          "--noEmit",
-          "--strict",
-          "--target",
-          "es2022",
-          "--module",
-          "nodenext",
-          "--moduleResolution",
-          "nodenext",
-          "consumer.ts"
-        ],
-        fixtureDir
-      );
-      // Execute the bundled consumer: the cross-entry instanceof check must
-      // hold at runtime against the installed tarball.
-      run(process.execPath, [join(fixtureDir, "consumer.js")], fixtureDir);
+        },
+        {
+          subpath: "web",
+          platformPackage: "@apps-in-toss/web-framework",
+          externalFlag: "--external:@apps-in-toss/web-framework",
+          consumerImports: `import { createWebIap } from ${JSON.stringify(
+            `${packedPackage.name}/web`
+          )};`,
+          consumerBody: `export const iap = createWebIap({ grant: async () => {} });
+export async function crossEntryInstanceofCheck(): Promise<boolean> {
+  try {
+    await iap.getPendingOrders();
+    return false;
+  } catch (error) {
+    return error instanceof SdkError;
+  }
+}
+
+// Executed by the fixture runner: must hold against the installed tarball.
+if (!(await crossEntryInstanceofCheck())) {
+  throw new Error("cross-entry SdkError instanceof check failed");
+}
+`
+        }
+      ];
+
+      for (const platform of platforms) {
+        // Subpath imports cleanly in plain Node even without its platform
+        // SDK: the official package is an optional peer, imported lazily.
+        const smokePath = join(installDir, `smoke-${platform.subpath}.mjs`);
+        writeFileSync(smokePath, `import ${JSON.stringify(`${packedPackage.name}/${platform.subpath}`)};\n`);
+        run(process.execPath, [smokePath], installDir);
+
+        const fixtureDir = join(installDir, `${platform.subpath}-fixture`);
+        mkdirSync(fixtureDir, { recursive: true });
+        writeFileSync(join(fixtureDir, "package.json"), JSON.stringify({ private: true, type: "module" }));
+        // Minimal stub of this fixture's platform SDK: present as a package
+        // (proving peer isolation) but with an IAP surface the loader will
+        // reject, so the executed consumer check is deterministic.
+        const stubDir = join(tempDir, "stubs", platform.platformPackage.replace("/", "-"));
+        mkdirSync(stubDir, { recursive: true });
+        writeFileSync(
+          join(stubDir, "package.json"),
+          JSON.stringify({ name: platform.platformPackage, version: "0.0.0-stub", type: "module" })
+        );
+        writeFileSync(
+          join(stubDir, "index.js"),
+          platform.subpath === "rn"
+            ? `export const loadFullScreenAd = () => () => {};\nexport const showFullScreenAd = () => () => {};\nexport const IAP = {};\n`
+            : `export const IAP = {};\n`
+        );
+        writeFileSync(
+          join(fixtureDir, "consumer.ts"),
+          `import { SdkError } from ${JSON.stringify(packedPackage.name)};
+${platform.consumerImports}
+${platform.consumerBody}
+`
+        );
+        run(
+          "npm",
+          [
+            "install",
+            "--ignore-scripts",
+            "--no-package-lock",
+            "--no-audit",
+            "--no-fund",
+            "--prefer-offline",
+            packedPackage.tarballPath,
+            "typescript@6.0.3",
+            "esbuild@0.28.2",
+            stubDir
+          ],
+          fixtureDir,
+          installCommandTimeoutMs
+        );
+        run(
+          "npm",
+          [
+            "exec",
+            "--",
+            "tsc",
+            "--noEmit",
+            "--strict",
+            "--target",
+            "es2022",
+            "--module",
+            "esnext",
+            "--moduleResolution",
+            "bundler",
+            "consumer.ts"
+          ],
+          fixtureDir
+        );
+        run(
+          "npm",
+          [
+            "exec",
+            "--",
+            "esbuild",
+            "consumer.ts",
+            "--bundle",
+            "--format=esm",
+            "--platform=node",
+            `--external:${platform.platformPackage}`,
+            "--outfile=consumer.js"
+          ],
+          fixtureDir
+        );
+        // NodeNext consumers resolve the shipped declarations directly; the
+        // emitted d.ts must carry extension-safe specifiers.
+        run(
+          "npm",
+          [
+            "exec",
+            "--",
+            "tsc",
+            "--noEmit",
+            "--strict",
+            "--target",
+            "es2022",
+            "--module",
+            "nodenext",
+            "--moduleResolution",
+            "nodenext",
+            "consumer.ts"
+          ],
+          fixtureDir
+        );
+        // Execute the bundled consumer: the cross-entry instanceof check
+        // must hold at runtime against the installed tarball (the stub IAP
+        // makes the adapter reject with a root SdkError).
+        run(process.execPath, [join(fixtureDir, "consumer.js")], fixtureDir);
+      }
     }
     console.log(`Verified ${packedPackage.name}@${packedPackage.version}`);
   }

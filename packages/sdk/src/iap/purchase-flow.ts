@@ -1,0 +1,199 @@
+import { runEventFlow } from "../event-flow.js";
+import type {
+  IapOneTimePurchaseParams,
+  IapPurchaseResult,
+  IapPurchaseSuccessInfo,
+  IapSubscriptionPurchaseParams
+} from "../index.js";
+import { type IapGrantCoordinator } from "./grant-coordinator.js";
+import { toIapErrorCode, toIapErrorMessage } from "./platform-contract.js";
+
+type PurchaseFlowEvent =
+  | { kind: "sdkSuccess"; data: IapPurchaseSuccessInfo }
+  | { kind: "sdkError"; error: unknown }
+  | { kind: "grantSettled"; orderId: string; ok: boolean };
+
+export interface PurchaseFlowOptions {
+  /** The platform's order-creation function (already capability-checked). */
+  startOrder:
+    | ((params: import("../index.js").IapOneTimePurchaseParams) => () => void)
+    | ((params: import("../index.js").IapSubscriptionPurchaseParams) => () => void);
+  coordinator: IapGrantCoordinator;
+  sku: string;
+  offerId?: string;
+  subscription: boolean;
+  /** Overall deadline for the purchase flow; 0 disables. */
+  timeoutMs: number;
+}
+
+/**
+ * Shared purchase flow for the /rn and /web IAP adapters, built on the
+ * common event-flow base:
+ *
+ * - The platform's `processProductGrant` slot wraps the consumer-injected
+ *   server grant callback (through the coordinator's dedupe). The platform
+ *   receives `true` only after the callback resolves.
+ * - Completion requires the success event's orderId to match the order the
+ *   grant confirmed for THIS flow. A grant for a different order ends the
+ *   flow as `failed` with `ORDER_MISMATCH`, and a success event arriving
+ *   before the grant settles is parked until the grant for the same order
+ *   confirms — a success event alone never completes a purchase.
+ * - A failed or throwing grant ends the flow as `grant_failed`; a purchase
+ *   is never reported successful over a failed server grant.
+ * - `USER_CANCELED` maps to `canceled`; other SDK errors to `failed`.
+ * - Timeout yields `unknown` (with the known orderId when available): the
+ *   server grant may already be in progress — resolve it through server
+ *   verification and the pending-order recovery flow. Late events after
+ *   any terminal state are ignored.
+ */
+export function runPurchaseFlow(options: PurchaseFlowOptions): Promise<IapPurchaseResult> {
+  const { startOrder, coordinator, sku, offerId, subscription, timeoutMs } = options;
+
+  // Per-flow state, shared by the register callbacks and the reducer.
+  let observedOrderId: string | undefined;
+  let observedSubscriptionId: string | undefined;
+  let confirmedOrderId: string | undefined;
+  let confirmedSubscriptionId: string | undefined;
+  let stashedSuccess: IapPurchaseSuccessInfo | undefined;
+  let grantFailure: { orderId: string; reason: string } | undefined;
+
+  const evaluate = (): { done: true; result: IapPurchaseResult } | { done: false } => {
+    if (grantFailure) {
+      return { done: true, result: { status: "grant_failed", ...grantFailure } };
+    }
+    if (stashedSuccess && confirmedOrderId !== undefined) {
+      if (confirmedOrderId !== stashedSuccess.orderId) {
+        return {
+          done: true,
+          result: {
+            status: "failed",
+            code: "ORDER_MISMATCH",
+            reason: `grant confirmed order ${confirmedOrderId} but the success event reported ${stashedSuccess.orderId}`
+          }
+        };
+      }
+      return {
+        done: true,
+        result: {
+          status: "completed",
+          orderId: confirmedOrderId,
+          ...(confirmedSubscriptionId !== undefined
+            ? { subscriptionId: confirmedSubscriptionId }
+            : {}),
+          success: stashedSuccess
+        }
+      };
+    }
+    return { done: false };
+  };
+
+  return runEventFlow<PurchaseFlowEvent, IapPurchaseResult>({
+    timeoutMs,
+    onTimeout: () => ({
+      status: "unknown",
+      // Include the order the platform already handed to the grant slot,
+      // even when the grant itself has not settled — consumers need it to
+      // verify and recover the uncertain purchase.
+      orderId: confirmedOrderId ?? observedOrderId ?? stashedSuccess?.orderId,
+      ...(observedSubscriptionId !== undefined || confirmedSubscriptionId !== undefined
+        ? { subscriptionId: confirmedSubscriptionId ?? observedSubscriptionId }
+        : {}),
+      reason:
+        "purchase flow timed out; the server grant may still be in progress — verify the order server-side and recover it via pending orders"
+    }),
+    register: (emit) => {
+      const processProductGrant = async (params: { orderId: string; subscriptionId?: string }) => {
+        observedOrderId = params.orderId;
+        observedSubscriptionId = params.subscriptionId;
+        try {
+          await coordinator.run({
+            orderId: params.orderId,
+            sku,
+            ...(params.subscriptionId !== undefined
+              ? { subscriptionId: params.subscriptionId }
+              : {})
+          });
+          confirmedOrderId = params.orderId;
+          confirmedSubscriptionId = params.subscriptionId;
+          emit({ kind: "grantSettled", orderId: params.orderId, ok: true });
+          return true;
+        } catch (error) {
+          grantFailure = {
+            orderId: params.orderId,
+            reason: `server grant callback failed: ${toIapErrorMessage(error)}`
+          };
+          emit({ kind: "grantSettled", orderId: params.orderId, ok: false });
+          return false;
+        }
+      };
+
+      const params = {
+        options: {
+          sku,
+          ...(offerId !== undefined && offerId !== null ? { offerId } : {}),
+          processProductGrant
+        },
+        onEvent: (event: { type: "success"; data: IapPurchaseSuccessInfo }) => {
+          if (event.type === "success") {
+            emit({ kind: "sdkSuccess", data: event.data });
+          }
+        },
+        onError: (error: unknown) => {
+          emit({ kind: "sdkError", error });
+        }
+      };
+
+      return (startOrder as (params: IapOneTimePurchaseParams | IapSubscriptionPurchaseParams) => () => void)(params);
+    },
+    reduce: (event) => {
+      switch (event.kind) {
+        case "sdkSuccess":
+          stashedSuccess = event.data;
+          return evaluate();
+        case "grantSettled":
+          return evaluate();
+        case "sdkError": {
+          if (grantFailure) {
+            // The server grant failed first; that outcome wins over the
+            // platform's error report.
+            return evaluate();
+          }
+          const code = toIapErrorCode(event.error);
+          if (
+            confirmedOrderId !== undefined ||
+            observedOrderId !== undefined ||
+            stashedSuccess !== undefined
+          ) {
+            // The order is already identified (grant ran, is running, or the
+            // success event named it) — an SDK error here is not a
+            // definitive failure. Report unknown so the caller verifies
+            // server-side instead of retrying into a second paid order.
+            return {
+              done: true,
+              result: {
+                status: "unknown",
+                orderId: confirmedOrderId ?? observedOrderId ?? stashedSuccess?.orderId,
+                ...(confirmedSubscriptionId !== undefined ||
+                observedSubscriptionId !== undefined
+                  ? { subscriptionId: confirmedSubscriptionId ?? observedSubscriptionId }
+                  : {}),
+                reason: `SDK error after the order was identified (${code ?? toIapErrorMessage(event.error)}); the order may already be granted — verify server-side and recover it via pending orders`
+              }
+            };
+          }
+          if (code === "USER_CANCELED") {
+            return { done: true, result: { status: "canceled" } };
+          }
+          return {
+            done: true,
+            result: {
+              status: "failed",
+              ...(code !== undefined ? { code } : {}),
+              reason: toIapErrorMessage(event.error)
+            }
+          };
+        }
+      }
+    }
+  });
+}

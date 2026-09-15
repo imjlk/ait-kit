@@ -34,6 +34,105 @@ export type SdkErrorCode =
   | "AD_LOAD_FAILED" // the provider rejected the load (transient; retryable)
   | "AD_LOAD_TIMEOUT"; // the load flow exceeded its deadline (retryable)
 
+// ---------------------------------------------------------------------------
+// In-app purchase contracts (runtime-neutral; adapters live in /rn and /web)
+// ---------------------------------------------------------------------------
+
+export type IapProductType = "CONSUMABLE" | "NON_CONSUMABLE" | "SUBSCRIPTION";
+export type IapSubscriptionRenewalCycle = "WEEKLY" | "MONTHLY" | "YEARLY";
+
+export interface IapSubscriptionOffer {
+  type: "FREE_TRIAL" | "NEW_SUBSCRIPTION" | "RETURNING";
+  offerId: string;
+  period: string;
+  displayAmount?: string;
+}
+
+export interface IapProduct {
+  sku: string;
+  type: IapProductType;
+  displayName: string;
+  displayAmount: string;
+  iconUrl: string;
+  description: string;
+  /** Subscription products only. */
+  renewalCycle?: IapSubscriptionRenewalCycle;
+  offers?: IapSubscriptionOffer[];
+}
+
+export interface IapPendingOrder {
+  orderId: string;
+  sku: string;
+  paymentCompletedDate: string;
+}
+
+/** Success payload delivered by the platform's purchase success event. */
+export interface IapPurchaseSuccessInfo {
+  orderId: string;
+  displayName: string;
+  displayAmount: string;
+  amount: number;
+  currency: string;
+  fraction: number;
+  miniAppIconUrl: string | null;
+}
+
+/**
+ * Consumer-injected server grant callback.
+ *
+ * Contract: resolve only AFTER your server has verified the order with the
+ * provider and persisted the grant. Resolving on the SDK event alone (or
+ * before persistence) breaks the purchase contract; rejecting or throwing
+ * marks the grant as failed and the purchase never reports completion.
+ * Server-side verification is the consumer's responsibility — SDK events
+ * are not payment verification.
+ */
+export type IapGrantCallback = (target: {
+  orderId: string;
+  sku: string;
+  subscriptionId?: string;
+}) => Promise<void>;
+
+/**
+ * Terminal outcome of a purchase flow. `completed` requires BOTH the
+ * platform's success event for the order AND your grant callback having
+ * resolved for that exact order — a grant for a different order never
+ * completes a purchase, and a success event alone never completes one.
+ */
+export type IapPurchaseResult =
+  | { status: "completed"; orderId: string; subscriptionId?: string; success: IapPurchaseSuccessInfo }
+  | { status: "canceled" }
+  | { status: "failed"; code?: string; reason?: string }
+  | { status: "grant_failed"; orderId: string; reason?: string }
+  | { status: "unknown"; orderId?: string; subscriptionId?: string; reason?: string };
+
+// Platform purchase-order parameter shapes (structural mirrors of the
+// official Domains API, shared by the /rn and /web connectors).
+
+export interface IapGrantOrderParams {
+  orderId: string;
+  subscriptionId?: string;
+}
+
+export interface IapOneTimePurchaseParams {
+  options: {
+    sku: string;
+    processProductGrant: (params: IapGrantOrderParams) => boolean | Promise<boolean>;
+  };
+  onEvent: (event: { type: "success"; data: IapPurchaseSuccessInfo }) => void | Promise<void>;
+  onError: (error: unknown) => void | Promise<void>;
+}
+
+export interface IapSubscriptionPurchaseParams {
+  options: {
+    sku: string;
+    offerId?: string | null;
+    processProductGrant: (params: IapGrantOrderParams) => boolean | Promise<boolean>;
+  };
+  onEvent: (event: { type: "success"; data: IapPurchaseSuccessInfo }) => void | Promise<void>;
+  onError: (error: unknown) => void | Promise<void>;
+}
+
 /** Typed error surfaced by the SDK adapters. */
 export class SdkError extends Error {
   code: SdkErrorCode;

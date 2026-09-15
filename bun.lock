@@ -64,9 +64,11 @@
       "version": "0.1.0",
       "peerDependencies": {
         "@apps-in-toss/framework": "*",
+        "@apps-in-toss/web-framework": "*",
       },
       "optionalPeers": [
         "@apps-in-toss/framework",
+        "@apps-in-toss/web-framework",
       ],
     },
     "templates/cloudflare-toss-api-service": {
