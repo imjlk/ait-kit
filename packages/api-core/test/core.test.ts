@@ -5,7 +5,9 @@ import {
   normalizeIapOrderStatusResponse,
   normalizeMessageResponse,
   TOSS_ENDPOINTS,
-  type MtlsClient
+  type MtlsClient,
+  type SmartMessageBulkSendInput,
+  type SmartMessageSendInput
 } from "../src";
 
 describe("@ait-kit/api-core", () => {
@@ -542,9 +544,11 @@ describe("@ait-kit/api-core", () => {
 
   test("normalizes smart message bulk requests", async () => {
     const seenBodies: unknown[] = [];
+    const seenHeaders: Headers[] = [];
     const mtlsClient: MtlsClient = {
       async request(_url, init) {
         seenBodies.push(JSON.parse(String(init.body)));
+        seenHeaders.push(new Headers(init.headers));
         return Response.json({ success: { result: { msgCount: 3 } } });
       }
     };
@@ -574,13 +578,53 @@ describe("@ait-kit/api-core", () => {
         { anonKey: "anonymous", context: { name: "C" } }
       ]
     });
+    // Bulk sends carry recipients in contextList body fields, never in headers.
+    expect(seenHeaders[0].get("x-toss-user-key")).toBeNull();
+    expect(seenHeaders[0].get("x-anon-key")).toBeNull();
+  });
+
+  test.each(
+    (
+      [
+        ["no identifier", {}],
+        ["duplicate identifiers", { userKey: "u", anonKey: "a" }],
+        ["wrong anon key type", { anonKey: 42 }],
+        ["empty user key", { userKey: "" }]
+      ] as ReadonlyArray<readonly [string, Record<string, unknown>]>
+    ).flatMap(([label, recipient]) => [
+      ["forward", label, recipient],
+      ["stub", label, recipient]
+    ] as const)
+  )("rejects a bulk recipient with %s (%s)", async (mode, _label, recipient) => {
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode,
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient: {
+          async request() {
+            throw new Error("invalid recipients must not reach the transport");
+          }
+        }
+      })
+    );
+
+    const input = {
+      templateSetCode: "template",
+      contextList: [{ ...recipient, context: {} }]
+    } as unknown as SmartMessageBulkSendInput;
+    await expect(api.smartMessageBulkSend(input)).rejects.toMatchObject({
+      code: "INVALID_CONTEXT_RECIPIENT",
+      status: 400
+    });
   });
 
   test("uses the smart message user header and returns all channel counts", async () => {
     let seenHeaders = new Headers();
+    let seenBody: unknown;
     const mtlsClient: MtlsClient = {
       async request(_url, init) {
         seenHeaders = new Headers(init.headers);
+        seenBody = JSON.parse(String(init.body));
         return Response.json({
           resultType: "SUCCESS",
           success: {
@@ -616,9 +660,110 @@ describe("@ait-kit/api-core", () => {
       sentAlimtalkCount: 1,
       sentFriendtalkCount: 1
     });
-    expect(seenHeaders.get("x-user-key")).toBe("user-key");
+    expect(seenHeaders.get("x-toss-user-key")).toBe("user-key");
+    expect(seenHeaders.get("x-user-key")).toBeNull();
+    expect(seenBody).toEqual({ templateSetCode: "template", context: { name: "A" } });
+  });
+
+  test.each([
+    ["tossUserKey", { tossUserKey: "toss-user-key" }, "toss-user-key"],
+    ["userKey", { userKey: "legacy-user-key" }, "legacy-user-key"]
+  ] as const)(
+    "sends legacy %s recipients through the x-toss-user-key header",
+    async (_label, recipient, expectedHeader) => {
+      let seenHeaders = new Headers();
+      const mtlsClient: MtlsClient = {
+        async request(_url, init) {
+          seenHeaders = new Headers(init.headers);
+          return Response.json({ resultType: "SUCCESS", success: { msgCount: 1 } });
+        }
+      };
+      const api = createAppsInTossApiRpc(
+        createAppsInTossApi({
+          mode: "forward",
+          upstreamBaseUrl: "https://partner.example",
+          mtlsClient
+        })
+      );
+
+      await api.smartMessageSend({
+        ...recipient,
+        templateSetCode: "template",
+        context: {}
+      });
+
+      expect(seenHeaders.get("x-toss-user-key")).toBe(expectedHeader);
+      expect(seenHeaders.get("x-user-key")).toBeNull();
+    }
+  );
+
+  test("passes anonymous keys to the x-anon-key header byte-for-byte", async () => {
+    let seenHeaders = new Headers();
+    const mtlsClient: MtlsClient = {
+      async request(_url, init) {
+        seenHeaders = new Headers(init.headers);
+        return Response.json({ resultType: "SUCCESS", success: { msgCount: 1 } });
+      }
+    };
+    const api = createAppsInTossApiRpc(
+      createAppsInTossApi({
+        mode: "forward",
+        upstreamBaseUrl: "https://partner.example",
+        mtlsClient
+      })
+    );
+
+    // Callers that store prefixed identifiers must pass the raw SDK hash;
+    // the kit never adds or strips prefixes in transit.
+    await api.smartMessageSend({
+      anonKey: "anon:stored-hash-value",
+      templateSetCode: "template",
+      context: {}
+    });
+
+    expect(seenHeaders.get("x-anon-key")).toBe("anon:stored-hash-value");
     expect(seenHeaders.get("x-toss-user-key")).toBeNull();
   });
+
+  const INVALID_SINGLE_RECIPIENTS: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+    ["no identifier", {}],
+    ["duplicate identifiers", { userKey: "u", tossUserKey: "t" }],
+    ["user and anonymous identifiers", { userKey: "u", anonKey: "a" }],
+    ["wrong user key type", { userKey: true }],
+    ["empty user key", { userKey: "  " }],
+    ["wrong anon key type", { anonKey: 42 }],
+    ["empty anon key", { anonKey: "" }]
+  ];
+
+  test.each(INVALID_SINGLE_RECIPIENTS.flatMap(([label, recipient]) => [
+    ["forward", label, recipient],
+    ["stub", label, recipient]
+  ] as const))(
+    "rejects a single message recipient with %s (%s)",
+    async (mode, _label, recipient) => {
+      const api = createAppsInTossApiRpc(
+        createAppsInTossApi({
+          mode,
+          upstreamBaseUrl: "https://partner.example",
+          mtlsClient: {
+            async request() {
+              throw new Error("invalid recipients must not reach the transport");
+            }
+          }
+        })
+      );
+
+      const input = {
+        ...recipient,
+        templateSetCode: "template",
+        context: {}
+      } as unknown as SmartMessageSendInput;
+      await expect(api.smartMessageSend(input)).rejects.toMatchObject({
+        code: "INVALID_MESSAGE_RECIPIENT",
+        status: 400
+      });
+    }
+  );
 
   test("normalizes the documented smart message failure reason", async () => {
     let seenHeaders = new Headers();

@@ -15,6 +15,7 @@ import type {
 export * from "./types";
 export * from "./mtls-client";
 export * from "./toss-envelope";
+export * from "./recipient";
 export * from "./login";
 export * from "./iap";
 export * from "./promotion";
