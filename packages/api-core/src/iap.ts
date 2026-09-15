@@ -167,9 +167,24 @@ export function normalizeIapOrderStatusResponse(
     }
   }
 
-  // With a SUCCESS envelope (or a legacy bare order object without one),
-  // the order payload must carry real string evidence.
-  const order = objectOrSelf(readOrderValue(upstream), upstreamObject);
+  // With a SUCCESS envelope, evidence lives in the nested success/data/
+  // result object only — a malformed or absent nested payload is an
+  // INVALID_RESPONSE and must never fall back to envelope-level fields
+  // (which would let a contradictory envelope verify itself). Only the
+  // envelope-free legacy shape reads the order directly from the top level.
+  const orderValue = readOrderValue(upstream);
+  let order: Record<string, unknown>;
+  if (envelopeResultType.state === "present") {
+    if (orderValue === undefined || orderValue === null) {
+      return invalidIapResponse(request, "success payload is missing the required orderId", upstreamStatus);
+    }
+    if (typeof orderValue !== "object" || Array.isArray(orderValue)) {
+      return invalidIapResponse(request, "success payload was not an object", upstreamStatus);
+    }
+    order = orderValue as Record<string, unknown>;
+  } else {
+    order = objectOrSelf(orderValue, upstreamObject);
+  }
 
   const providerOrderIdState = readStrictStringState(order, ["orderId", "success.orderId", "data.orderId"]);
   if (providerOrderIdState.state === "absent") {

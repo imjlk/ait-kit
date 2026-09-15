@@ -183,7 +183,7 @@ export function normalizeMessageResponse(
   const isEnvelopeFreeNormalized =
     envelopeResultType.state === "absent" &&
     !upstreamObject.result &&
-    upstreamObject.providerStatus !== undefined;
+    (upstreamObject.providerStatus !== undefined || upstreamObject.status !== undefined);
   if (upstreamObject.ok === false && !isEnvelopeFreeNormalized) {
     return {
       ok: false,

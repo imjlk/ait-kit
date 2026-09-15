@@ -1844,6 +1844,39 @@ describe("IAP provider evidence type validation", () => {
     expect(exact).toMatchObject({ ok: true, verified: true, sku: "sku-a" });
   });
 
+  test("a SUCCESS envelope with a primitive success never falls back to envelope fields", () => {
+    const response = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      {
+        resultType: "SUCCESS",
+        success: "ok",
+        orderId: "order-id",
+        status: "PAYMENT_COMPLETED"
+      }
+    );
+
+    expect(response).toMatchObject({ ok: false, error: "INVALID_RESPONSE" });
+    expect(response).not.toMatchObject({ verified: true });
+  });
+
+  test("a SUCCESS envelope without a nested payload is invalid", () => {
+    const response = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { resultType: "SUCCESS", orderId: "order-id", status: "PAYMENT_COMPLETED" }
+    );
+
+    expect(response).toMatchObject({ ok: false, error: "INVALID_RESPONSE" });
+  });
+
+  test("legacy bare order objects without an envelope still verify", () => {
+    const response = normalizeIapOrderStatusResponse(
+      { orderId: "order-id" },
+      { orderId: "order-id", status: "PAYMENT_COMPLETED" }
+    );
+
+    expect(response).toMatchObject({ ok: true, verified: true, providerStatus: "PAYMENT_COMPLETED" });
+  });
+
   test("network error responses keep the provider error code for diagnostics", () => {
     const response = normalizeIapOrderStatusResponse(
       { orderId: "order-id" },
@@ -1976,6 +2009,16 @@ describe("smart message send-result evidence validation", () => {
     );
 
     expect(response).toMatchObject({ ok: false, providerStatus: "FAILED" });
+  });
+
+  test("a status-keyed contradictory normalized body is UNKNOWN, not FAILED", () => {
+    const response = normalizeMessageResponse({}, { ok: false, status: "SENT" });
+
+    expect(response).toMatchObject({
+      ok: false,
+      providerStatus: "UNKNOWN",
+      error: "INVALID_RESPONSE"
+    });
   });
 
   test("a result-bearing ok:false body never becomes SENT", () => {
