@@ -7,13 +7,13 @@ import {
   sanitizeHeaders,
   sanitizeResponseHeaders,
   stringOrUndefined
-} from "./toss-envelope";
+} from "./toss-envelope.js";
 import type {
   MtlsClient,
   NormalizedAppsInTossCoreOptions,
   RawMtlsRequest,
   RawMtlsResponse
-} from "./types";
+} from "./types.js";
 
 export interface TossMtlsRequest {
   method: string;

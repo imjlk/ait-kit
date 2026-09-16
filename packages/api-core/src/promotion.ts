@@ -1,5 +1,5 @@
-import { requestToss, resolveMtlsClient, resolveMtlsUrl } from "./mtls-client";
-import { normalizeMessageRecipient, recipientIdentifierHeaders } from "./recipient";
+import { requestToss, resolveMtlsClient, resolveMtlsUrl } from "./mtls-client.js";
+import { normalizeMessageRecipient, recipientIdentifierHeaders } from "./recipient.js";
 import {
   AppsInTossApiError,
   clientError,
@@ -13,7 +13,7 @@ import {
   stringOrUndefined,
   upstreamFailureCode,
   upstreamFailureReason
-} from "./toss-envelope";
+} from "./toss-envelope.js";
 import {
   TOSS_ENDPOINTS,
   type NormalizedAppsInTossCoreOptions,
@@ -25,7 +25,7 @@ import {
   type PromotionRewardPrepareResponse,
   type PromotionRewardStatusInput,
   type PromotionRewardStatusResponse
-} from "./types";
+} from "./types.js";
 
 export async function grantPromotionReward(
   body: PromotionRewardGrantInput,

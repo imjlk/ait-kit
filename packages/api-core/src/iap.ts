@@ -1,4 +1,4 @@
-import { requestToss } from "./mtls-client";
+import { requestToss } from "./mtls-client.js";
 import {
   debugLog,
   httpStatusOk,
@@ -9,7 +9,7 @@ import {
   stringOrUndefined,
   upstreamFailureCode,
   upstreamFailureReason
-} from "./toss-envelope";
+} from "./toss-envelope.js";
 import {
   TOSS_ENDPOINTS,
   type IapOrderStatusInput,
@@ -18,7 +18,7 @@ import {
   type IapOrderVerifiedResponse,
   type IapVerificationCode,
   type NormalizedAppsInTossCoreOptions
-} from "./types";
+} from "./types.js";
 
 const RETRYABLE_IAP_ORDER_STATUSES = new Set([
   "NOT_FOUND",

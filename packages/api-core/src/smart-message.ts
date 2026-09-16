@@ -1,5 +1,5 @@
-import { requestToss } from "./mtls-client";
-import { normalizeMessageRecipient, recipientIdentifierHeaders, type MessageRecipient } from "./recipient";
+import { requestToss } from "./mtls-client.js";
+import { normalizeMessageRecipient, recipientIdentifierHeaders, type MessageRecipient } from "./recipient.js";
 import {
   clientError,
   httpStatusOk,
@@ -12,7 +12,7 @@ import {
   stringOrUndefined,
   upstreamFailureCode,
   upstreamFailureReason
-} from "./toss-envelope";
+} from "./toss-envelope.js";
 import {
   SMART_MESSAGE_BULK_MAX_CONTEXTS,
   TOSS_ENDPOINTS,
@@ -20,7 +20,7 @@ import {
   type SmartMessageBulkSendInput,
   type SmartMessageResponse,
   type SmartMessageSendInput
-} from "./types";
+} from "./types.js";
 
 export async function sendSmartMessage(
   body: SmartMessageSendInput,
