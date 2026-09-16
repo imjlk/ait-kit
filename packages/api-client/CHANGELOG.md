@@ -1,5 +1,16 @@
 # @ait-kit/api-client
 
+## 0.4.1 — 2026-09-16
+
+### Patch changes
+
+- [3993c4e](https://github.com/imjlk/ait-kit/commit/3993c4ed313c66b3dbd04c5080fedc7e5bbd1cab) Settle Node mTLS response conversion failures through the typed error path.
+  
+  When the response body finished reading but converting it into a fetch Response threw — for example a raw status 600, which the Fetch Response constructor rejects — the transport had already confirmed success internally: the completion flags were set and the deadline timer plus AbortSignal listener were torn down before conversion ran, so the conversion exception escaped the event handler as an uncaught exception while the request promise stayed pending forever. Conversion now runs before any success confirmation: body concatenation, header conversion, and Response construction are protected as one stage, and a failure rejects with the existing `NodeMtlsTransportError`/`REQUEST_FAILED` contract with the original exception preserved as `cause`. Timeout and abort outcomes are never overwritten by late conversion errors, 204/205/304 and empty-body handling is unchanged, and valid 4xx/5xx responses still resolve as HTTP responses.
+  
+  No public signatures, options, or error codes changed; no automatic retries were added — a transport failure still never implies the upstream effect (grant, message) did not happen. Regression coverage now includes the status-600 case in the Bun test suite, in a real Node child process against the built output (watchdog-guarded, exit-code asserted), and from an installed tarball consumer exercising a full local mTLS lifecycle (200 request, deadline failure, 600 conversion failure, post-failure reuse) plus /node type compilation under bundler and NodeNext resolution. The /node declarations now carry explicit `.js` specifiers so NodeNext consumers resolve them; the api-core package's extensionless declaration chain remains a separate pre-existing issue. — Thanks @imjlk!
+- Updated dependencies: api-core@0.4.1
+
 ## 0.4.0 — 2026-09-16
 
 ### Patch changes

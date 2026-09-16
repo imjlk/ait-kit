@@ -1,5 +1,11 @@
 # @ait-kit/api-core
 
+## 0.4.1 — 2026-09-16
+
+### Patch changes
+
+- Bumped due to fixed dependency group policy
+
 ## 0.4.0 — 2026-09-16
 
 ### Minor changes
