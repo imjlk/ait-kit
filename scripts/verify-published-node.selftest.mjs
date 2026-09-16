@@ -6,7 +6,7 @@
 //
 // Run by scripts/test-package-tarballs.mjs as part of the ordinary PR CI.
 import { spawnSync } from "node:child_process";
-import { readdirSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -200,16 +200,39 @@ for (const fixture of scenarioFixtures) {
 //    and name the failing phase.
 // ---------------------------------------------------------------------------
 await check("CLI exits non-zero and reports the resolve phase for an unknown version", async () => {
-  const result = spawnSync(
-    process.execPath,
-    [join(here, "verify-published-node.mjs"), "--version", "99.99.99", "--registry", "https://registry.npmjs.org/"],
-    { encoding: "utf8", timeout: 60_000, env: { ...process.env, AIT_PUBLISHED_RESOLVE_ATTEMPTS: "1" } }
+  // Offline end-to-end: a fake npm on PATH answers the registry lookup
+  // with npm's E404 output shape, so the real CLI exercises its full
+  // failure path (arg parsing → resolve → phase reporting → exit code)
+  // without network dependence.
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ait-kit-fake-npm-"));
+  const fakeNpm = join(fakeBinDir, "npm");
+  writeFileSync(
+    fakeNpm,
+    '#!/bin/sh\necho "npm error code E404" >&2\necho "npm error 404 Not Found - GET https://registry.npmjs.org/@ait-kit%2fapi-client" >&2\nexit 1\n'
   );
-  if (result.status === 0) {
-    throw new Error(`CLI exited 0 for an unknown version: ${result.stdout}${result.stderr}`);
-  }
-  if (!/FAILED \[resolve\]/.test(result.stderr || "")) {
-    throw new Error(`CLI did not report the resolve phase: ${result.stderr}`);
+  chmodSync(fakeNpm, 0o755);
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [join(here, "verify-published-node.mjs"), "--version", "99.99.99", "--registry", "https://registry.npmjs.org/"],
+      {
+        encoding: "utf8",
+        timeout: 60_000,
+        env: {
+          ...process.env,
+          PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+          AIT_PUBLISHED_RESOLVE_ATTEMPTS: "1"
+        }
+      }
+    );
+    if (result.status === 0) {
+      throw new Error(`CLI exited 0 for an unknown version: ${result.stdout}${result.stderr}`);
+    }
+    if (!/FAILED \[resolve\]/.test(result.stderr || "")) {
+      throw new Error(`CLI did not report the resolve phase: ${result.stderr}`);
+    }
+  } finally {
+    rmSync(fakeBinDir, { recursive: true, force: true });
   }
 });
 
