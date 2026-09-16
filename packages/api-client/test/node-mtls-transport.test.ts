@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { MtlsClient } from "@ait-kit/api-core";
 import {
   createNodeMtlsTransport,
@@ -106,6 +109,90 @@ describe("@ait-kit/api-client/node mTLS transport", () => {
     await expect(
       slow.request(`${server.baseUrl}/slow-body?chunks=30`, { method: "GET" })
     ).rejects.toMatchObject({ code: "TIMEOUT" });
+  });
+
+  test("resolves valid 4xx and 5xx statuses as HTTP responses", async () => {
+    // Transport failures and HTTP failures stay separate: a technically
+    // valid 500 resolves as a Response for the upper layers to interpret.
+    const serverError = await transport.request(`${server.baseUrl}/status?code=500`, { method: "GET" });
+    expect(serverError.status).toBe(500);
+    expect(serverError.ok).toBe(false);
+
+    const notFound = await transport.request(`${server.baseUrl}/status?code=404`, { method: "GET" });
+    expect(notFound.status).toBe(404);
+  });
+
+  test("resolves 205 and 304 with null bodies like 204", async () => {
+    const reset = await transport.request(`${server.baseUrl}/status?code=205`, { method: "GET" });
+    expect(reset.status).toBe(205);
+    expect(reset.body).toBeNull();
+
+    const notModified = await transport.request(`${server.baseUrl}/status?code=304`, { method: "GET" });
+    expect(notModified.status).toBe(304);
+    expect(notModified.body).toBeNull();
+  });
+
+  test("rejects status-600 responses as typed REQUEST_FAILED conversion failures", async () => {
+    const promise = transport.request(`${server.baseUrl}/status?code=600`, { method: "GET" });
+
+    let error: unknown;
+    try {
+      await promise;
+    } catch (caught) {
+      error = caught;
+    }
+    // Not pending, not TIMEOUT: the completed body's conversion to a fetch
+    // Response must reject through the typed failure path.
+    expect(error).toBeInstanceOf(NodeMtlsTransportError);
+    expect((error as NodeMtlsTransportError).code).toBe("REQUEST_FAILED");
+    expect((error as NodeMtlsTransportError).cause).toBeInstanceOf(Error);
+
+    // The same transport instance serves a normal request afterwards, and
+    // the failed conversion did not re-contact the server.
+    const next = await transport.request(`${server.baseUrl}/immediate`, { method: "GET" });
+    expect(next.status).toBe(200);
+  });
+
+  test("runs the core lifecycle in the Node client runtime against the built dist", async () => {
+    // The suite itself runs under Bun; this check runs the BUILT /node
+    // output in a real Node child process (no global handlers, so an
+    // uncaught conversion exception would exit non-zero) covering: a
+    // normal mTLS 200 request, the status-600 conversion regression
+    // (typed REQUEST_FAILED with the cause preserved), and a successful
+    // follow-up request on the same transport.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const child = spawn(
+      "node",
+      [
+        join(here, "helpers/node-runtime-check.mjs"),
+        server.baseUrl,
+        join(server.dir, "ca.crt"),
+        join(server.dir, "client.crt"),
+        join(server.dir, "client.key")
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] }
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+
+    const exitCode = await new Promise<number | null>((resolve) => {
+      const watchdog = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve(null);
+      }, 30_000);
+      child.on("exit", (code) => {
+        clearTimeout(watchdog);
+        resolve(code);
+      });
+    });
+
+    // A watchdog kill (null) fails the test: the child must terminate on
+    // its own, and it must terminate successfully.
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("PASS");
+    expect(stderr).toBe("");
   });
 
   test("rejects already-aborted requests without contacting the server", async () => {

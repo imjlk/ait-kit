@@ -11,6 +11,8 @@ export interface MtlsTestServer {
   clientCert: string;
   clientKey: string;
   baseUrl: string;
+  /** Directory holding the generated PEM files (ca.crt, client.crt, client.key). */
+  dir: string;
   close(): Promise<void>;
 }
 
@@ -63,6 +65,7 @@ export async function startMtlsTestServer(): Promise<MtlsTestServer> {
     clientCert: readFileSync(cert("client.crt"), "utf8"),
     clientKey: readFileSync(cert("client.key"), "utf8"),
     baseUrl: `https://localhost:${port}`,
+    dir,
     close: async () => {
       child.kill("SIGTERM");
       await new Promise<void>((resolve) => {

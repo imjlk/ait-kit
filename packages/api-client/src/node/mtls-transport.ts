@@ -246,33 +246,48 @@ export function createNodeMtlsTransport(options: NodeMtlsTransportOptions) {
           });
           response.on("end", () => {
             if (completed || settled) return;
-            completed = true;
-            settled = true;
-            cleanup();
-            const bodyBuffer = Buffer.concat(chunks);
-            const status = response.statusCode ?? 200;
-            // The Fetch Response constructor throws for non-null bodies on
-            // null-body statuses (and this handler runs after settle), so
-            // those statuses always construct with null. Empty bodies pass
-            // null too.
-            const bodyInit =
-              status === 204 || status === 205 || status === 304 || bodyBuffer.length === 0
-                ? null
-                : new Uint8Array(bodyBuffer);
-            const responseHeaders = new Headers();
-            for (const [name, value] of Object.entries(response.headers)) {
-              if (value === undefined) continue;
-              for (const item of Array.isArray(value) ? value : [value]) {
-                responseHeaders.append(name, String(item));
+            // Build the whole fetch Response BEFORE confirming success:
+            // body concatenation, header conversion, and the Response
+            // constructor can all throw (e.g. statuses outside the Fetch
+            // range such as 600), and a throw after success confirmation
+            // would escape this handler as an uncaught exception while the
+            // request promise stays pending forever. Conversion failures
+            // route through the typed failure path instead.
+            try {
+              const bodyBuffer = Buffer.concat(chunks);
+              const status = response.statusCode ?? 200;
+              // The Fetch Response constructor throws for non-null bodies on
+              // null-body statuses, so those statuses always construct with
+              // null. Empty bodies pass null too.
+              const bodyInit =
+                status === 204 || status === 205 || status === 304 || bodyBuffer.length === 0
+                  ? null
+                  : new Uint8Array(bodyBuffer);
+              const responseHeaders = new Headers();
+              for (const [name, value] of Object.entries(response.headers)) {
+                if (value === undefined) continue;
+                for (const item of Array.isArray(value) ? value : [value]) {
+                  responseHeaders.append(name, String(item));
+                }
               }
-            }
-            resolve(
-              new Response(bodyInit, {
+              const fetchResponse = new Response(bodyInit, {
                 status,
                 statusText: response.statusMessage ?? "",
                 headers: responseHeaders
-              })
-            );
+              });
+              completed = true;
+              settled = true;
+              cleanup();
+              resolve(fetchResponse);
+            } catch (error) {
+              fail(
+                new NodeMtlsTransportError(
+                  "REQUEST_FAILED",
+                  "failed to convert the completed response into a fetch Response",
+                  { cause: error }
+                )
+              );
+            }
           });
         });
 
