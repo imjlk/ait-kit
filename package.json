@@ -25,6 +25,7 @@
     "release": "sampo release",
     "publish:oidc": "bash scripts/publish-oidc.sh",
     "publish:dry-run": "bun run packages:build && bun run test:packages && DRY_RUN=1 bash scripts/publish-oidc.sh",
+    "verify:published:node": "node scripts/verify-published-node.mjs",
     "sampo:add": "sampo add"
   },
   "devDependencies": {

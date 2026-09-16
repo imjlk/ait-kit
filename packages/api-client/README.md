@@ -66,5 +66,36 @@ Supported runtimes for `/node`: verified with Bun 1.4.0 (test suite) and
 Node.js 26.4.0 (test-suite child processes plus tarball consumer checks);
 CI pins Bun 1.4.2 and Node.js 24 for the same checks.
 
+## Verifying a published release (repository tooling)
+
+From the [AIT Kit repository](https://github.com/imjlk/ait-kit), the mTLS
+contract of an **npm-published** release can be re-verified end to end. The
+command accepts an exact version only (ranges and dist-tags are rejected),
+installs that release from the npm registry into an isolated throwaway
+consumer project, resolves `@ait-kit/api-client/node` from that project's
+own `node_modules`, and runs the same five-scenario mTLS contract used for
+repository builds and tarball checks (normal 200 with client-certificate
+verification, overall deadline, broken body, status-600 conversion failure
+with `cause` preserved, reuse after failure):
+
+```bash
+bun run verify:published:node -- --version 0.4.1 --report ./verify-report.json
+```
+
+`--report <path>` (optional) writes a JSON report that survives cleanup:
+requested and actually-installed `api-client`/`api-core` versions, the
+resolved module path with proof it lives inside the installed package,
+runtime versions, per-scenario outcomes, child exit code/signal, and the
+verification tooling's own commit (kept separate from the release commit,
+which npm metadata cannot confirm — it is reported as `unknown` when not
+independently established). Registry propagation delay right after a
+publish is retried within a finite budget; the command only installs and
+verifies — it never publishes or modifies repository build output.
+
+Interpretation: a passing run proves the mTLS transport contract of that
+exact published version against a local loopback test server. It is not a
+check against the real Toss production API, and it says nothing about
+server-side ledgers or SDK integrations consuming this package.
+
 See the [AIT Kit repository](https://github.com/imjlk/ait-kit) for proxy configuration and API
 examples.
