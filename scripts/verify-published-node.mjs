@@ -27,9 +27,11 @@ import { repoFileUrl, startMtlsServer } from "./lib/start-mtls-server.mjs";
 const PACKAGE_NAME = "@ait-kit/api-client";
 const ENTRYPOINT = `${PACKAGE_NAME}/node`;
 const CLIENT_CN = "ait-kit-verify-client";
-// Finite retry budget for registry propagation delay: 5 attempts, 10s apart
-// (~40s of waiting total), then the run fails as a resolve error.
-const RESOLVE_ATTEMPTS = 5;
+// Finite retry budget for registry propagation delay (default: 5 attempts,
+// 10s apart, ~40s of waiting total), then the run fails as a resolve error.
+// The attempt count is tunable through the environment for the tool's own
+// regression tests only; consumers never need to change it.
+const RESOLVE_ATTEMPTS = positiveIntEnv("AIT_PUBLISHED_RESOLVE_ATTEMPTS", 5);
 const RESOLVE_RETRY_DELAY_MS = 10_000;
 // Finite budget for the whole consumer child (install→scenario run).
 const CHILD_TIMEOUT_MS = positiveIntEnv("AIT_PUBLISHED_VERIFY_TIMEOUT_MS", 120_000);

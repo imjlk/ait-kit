@@ -430,6 +430,12 @@ try {
     }
     console.log(`Verified ${packedPackage.name}@${packedPackage.version}`);
   }
+
+  // Regression tests for the verification tooling itself (failure paths,
+  // wrong-target protection, cleanup). Local fixtures only — this never
+  // replaces the real npm-release verification command.
+  console.log("Running verification-tooling selftest...");
+  run(process.execPath, [join(rootDir, "scripts/verify-published-node.selftest.mjs")], rootDir, 300_000);
 } catch (error) {
   verificationError = error;
   throw error;

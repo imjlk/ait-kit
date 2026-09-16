@@ -30,70 +30,81 @@ const rootDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
  */
 export async function startMtlsServer({ clientCn = "ait-kit-verify-client" } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ait-kit-mtls-verify-"));
-  const run = (args) => execFileSync("openssl", args, { cwd: dir });
-  run(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-days", "1", "-subj", "/CN=ait-kit-verify-ca"]);
-  run(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key", "-out", "server.csr", "-subj", "/CN=localhost"]);
-  execFileSync(
-    "openssl",
-    ["x509", "-req", "-in", "server.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "server.crt", "-days", "1", "-extfile", "-"],
-    { cwd: dir, input: "subjectAltName=DNS:localhost,IP:127.0.0.1\n" }
-  );
-  run(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "client.key", "-out", "client.csr", "-subj", `/CN=${clientCn}`]);
-  run(["x509", "-req", "-in", "client.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "client.crt", "-days", "1"]);
+  let child;
+  try {
+    const run = (args) => execFileSync("openssl", args, { cwd: dir });
+    run(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-days", "1", "-subj", "/CN=ait-kit-verify-ca"]);
+    run(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key", "-out", "server.csr", "-subj", "/CN=localhost"]);
+    execFileSync(
+      "openssl",
+      ["x509", "-req", "-in", "server.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "server.crt", "-days", "1", "-extfile", "-"],
+      { cwd: dir, input: "subjectAltName=DNS:localhost,IP:127.0.0.1\n" }
+    );
+    run(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "client.key", "-out", "client.csr", "-subj", `/CN=${clientCn}`]);
+    run(["x509", "-req", "-in", "client.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "client.crt", "-days", "1"]);
 
-  const child = spawn(
-    "node",
-    [join(rootDir, "packages/api-client/test/helpers/mtls-test-server.mjs"), dir, "0"],
-    { stdio: ["ignore", "pipe", "inherit"] }
-  );
-  // Startup-failure cleanup must kill the orphaned child and remove the
-  // generated key material; once readiness settles it must not fire again.
-  let settled = false;
-  const port = await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      rmSync(dir, { recursive: true, force: true });
-      reject(new Error("mTLS verification server did not start"));
-    }, 10_000);
-    child.stdout.on("data", (chunk) => {
-      const match = /ready:(\d+)/.exec(chunk.toString());
-      if (match) {
-        clearTimeout(timeout);
-        resolve(Number(match[1]));
-      }
-    });
-    child.on("exit", (code) => {
-      clearTimeout(timeout);
-      if (!settled) {
+    child = spawn(
+      "node",
+      [join(rootDir, "packages/api-client/test/helpers/mtls-test-server.mjs"), dir, "0"],
+      { stdio: ["ignore", "pipe", "inherit"] }
+    );
+    // Startup-failure cleanup must kill the orphaned child and remove the
+    // generated key material; once readiness settles it must not fire again.
+    let settled = false;
+    const port = await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        child.kill("SIGKILL");
         rmSync(dir, { recursive: true, force: true });
-        reject(new Error(`mTLS verification server exited early: ${code}`));
-      }
-    });
-  }).finally(() => {
-    settled = true;
-  });
-  return {
-    baseUrl: `https://localhost:${port}`,
-    dir,
-    caPath: join(dir, "ca.crt"),
-    certPath: join(dir, "client.crt"),
-    keyPath: join(dir, "client.key"),
-    ca: readFileSync(join(dir, "ca.crt"), "utf8"),
-    close: async () => {
-      child.kill("SIGTERM");
-      await new Promise((resolve) => {
-        const forceKill = setTimeout(() => {
-          child.kill("SIGKILL");
-          resolve();
-        }, 2_000);
-        child.on("exit", () => {
-          clearTimeout(forceKill);
-          resolve();
-        });
+        reject(new Error("mTLS verification server did not start"));
+      }, 10_000);
+      child.stdout.on("data", (chunk) => {
+        const match = /ready:(\d+)/.exec(chunk.toString());
+        if (match) {
+          clearTimeout(timeout);
+          resolve(Number(match[1]));
+        }
       });
-      rmSync(dir, { recursive: true, force: true });
+      child.on("exit", (code) => {
+        clearTimeout(timeout);
+        if (!settled) {
+          rmSync(dir, { recursive: true, force: true });
+          reject(new Error(`mTLS verification server exited early: ${code}`));
+        }
+      });
+    }).finally(() => {
+      settled = true;
+    });
+    return {
+      baseUrl: `https://localhost:${port}`,
+      dir,
+      caPath: join(dir, "ca.crt"),
+      certPath: join(dir, "client.crt"),
+      keyPath: join(dir, "client.key"),
+      ca: readFileSync(join(dir, "ca.crt"), "utf8"),
+      close: async () => {
+        child.kill("SIGTERM");
+        await new Promise((resolve) => {
+          const forceKill = setTimeout(() => {
+            child.kill("SIGKILL");
+            resolve();
+          }, 2_000);
+          child.on("exit", () => {
+            clearTimeout(forceKill);
+            resolve();
+          });
+        });
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+  } catch (error) {
+    // Material generation or startup failed: no orphaned helper process and
+    // no leftover key material may survive the failure.
+    if (child && child.exitCode === null) {
+      child.kill("SIGKILL");
     }
-  };
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 /**
