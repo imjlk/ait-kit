@@ -1,6 +1,6 @@
 import { os } from "@orpc/server";
-import type { PublicApiContext } from "./types";
-import { healthInputSchema, healthOutputSchema, smartMessageOutputSchema, smartMessageSendInputSchema } from "./schemas";
+import type { PublicApiContext } from "./types.js";
+import { healthInputSchema, healthOutputSchema, smartMessageOutputSchema, smartMessageSendInputSchema } from "./schemas.js";
 
 const publicProcedure = os.$context<PublicApiContext>();
 
