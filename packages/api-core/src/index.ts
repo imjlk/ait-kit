@@ -1,33 +1,33 @@
-import { verifyAnonKey } from "./anon-key";
-import { getIapOrderStatus } from "./iap";
-import { completeTossLogin, removeTossLoginByUserKey } from "./login";
-import { rawMtlsRequest } from "./mtls-client";
+import { verifyAnonKey } from "./anon-key.js";
+import { getIapOrderStatus } from "./iap.js";
+import { completeTossLogin, removeTossLoginByUserKey } from "./login.js";
+import { rawMtlsRequest } from "./mtls-client.js";
 import {
   executePromotionReward,
   grantPromotionReward,
   preparePromotionReward,
   statusPromotionReward
-} from "./promotion";
-import { bulkSendSmartMessage, sendSmartMessage } from "./smart-message";
-import { normalizeCoreOptions, stringOrUndefined } from "./toss-envelope";
+} from "./promotion.js";
+import { bulkSendSmartMessage, sendSmartMessage } from "./smart-message.js";
+import { normalizeCoreOptions, stringOrUndefined } from "./toss-envelope.js";
 import type {
   AppsInTossApi,
   AppsInTossApiRpc,
   AppsInTossCoreOptions,
   HealthResponse,
   NormalizedAppsInTossCoreOptions
-} from "./types";
+} from "./types.js";
 
-export * from "./types";
-export * from "./mtls-client";
-export * from "./toss-envelope";
-export * from "./recipient";
-export * from "./login";
-export * from "./iap";
-export * from "./anon-key";
-export * from "./promotion";
-export * from "./smart-message";
-export * from "./raw";
+export * from "./types.js";
+export * from "./mtls-client.js";
+export * from "./toss-envelope.js";
+export * from "./recipient.js";
+export * from "./login.js";
+export * from "./iap.js";
+export * from "./anon-key.js";
+export * from "./promotion.js";
+export * from "./smart-message.js";
+export * from "./raw.js";
 
 export function createAppsInTossApi(options: AppsInTossCoreOptions = {}): AppsInTossApi {
   const coreOptions = normalizeCoreOptions(options);

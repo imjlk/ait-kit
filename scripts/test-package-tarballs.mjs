@@ -24,6 +24,22 @@ const OFFICIAL_SDK_VERSIONS = {
   rn: "2.10.10",
   web: "3.4.0"
 };
+// Consumer type-check toolchain, pinned explicitly (never "latest"): every
+// fixture runs on the long-standing consumer floor, and the server-declaration
+// fixtures additionally re-run on the repository's own pinned TypeScript so
+// regressions only newer tsc flags are caught in CI. Two pinned versions do
+// not certify the versions between them.
+const CONSUMER_TYPESCRIPT_VERSION = "6.0.3";
+const REPO_TYPESCRIPT_VERSION = "7.0.2";
+const NODE_TYPES_VERSION = "26.5.1";
+const WORKERS_TYPES_VERSION = "5.20260915.1";
+// The DOM-free Node consumer environment for server declarations: lib es2022
+// plus @types/node provides fetch globals (Response/RequestInit/AbortSignal)
+// without mixing Worker or DOM types into a Node check.
+const NODE_TYPES_TSC_OPTIONS = { lib: "es2022", types: "node" };
+// The Worker consumer environment stays separate: workers-types supplies the
+// runtime globals, and lib es2022 keeps DOM declarations out.
+const WORKER_TYPES_TSC_OPTIONS = { lib: "es2022", types: "@cloudflare/workers-types" };
 const localPackages = readdirSync(join(rootDir, "packages"), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => join("packages", entry.name))
@@ -261,9 +277,13 @@ try {
           installDir
         );
 
-        // The installed /node entry's public types compile for an
-        // independent consumer under BOTH bundler and NodeNext resolution
-        // (its declarations carry explicit .js specifiers).
+        // The installed server declarations must carry extension-safe
+        // relative specifiers (TS2834 otherwise breaks every NodeNext
+        // consumer and cascades into TS2305). Asserting this on the
+        // INSTALLED d.ts also proves the checks below resolve the tarball's
+        // declarations, not workspace sources.
+        assertInstalledDeclarationSpecifiers(installDir, "@ait-kit/api-core", "dist/index.d.ts");
+        assertInstalledDeclarationSpecifiers(installDir, "@ait-kit/api-client", "dist/node/index.d.ts");
         const nodeTypesPath = join(installDir, "smoke-node-types.ts");
         writeFileSync(
           nodeTypesPath,
@@ -280,39 +300,142 @@ try {
             "if (!(NodeMtlsTransportError instanceof Error)) {\n" +
             '  throw new Error("NodeMtlsTransportError must extend Error");\n' +
             "}\n" +
-            "void transport;\n"
+            "void transport;\n\n" +
+            "// @ts-expect-error required certificate options are missing\n" +
+            "createNodeMtlsTransport({});\n" +
+            "// @ts-expect-error timeoutMs must be a number\n" +
+            'createNodeMtlsTransport({ cert: "cert", key: "key", timeoutMs: "1000" });\n'
         );
-        // The root import must stay runtime-neutral and type-compatible
-        // with the /node transport's Responses (wired through the documented
-        // fetch option). Bundler resolution only: the api-core package's
-        // emitted declaration chain still uses extensionless relative
-        // specifiers, which is a pre-existing defect outside this PR.
+        // The root client and the /node transport used together: the root's
+        // public declarations must reference api-core types under BOTH
+        // bundler and NodeNext resolution, the IAP response union must
+        // narrow correctly, and contract violations must be rejected.
         const rootTypesPath = join(installDir, "smoke-root-types.ts");
         writeFileSync(
           rootTypesPath,
-          'import { createTossMtlsHttpClient } from ' +
+          'import { createTossMtlsHttpClient, TossMtlsHttpClientError, type IapOrderStatusResponse } from ' +
             JSON.stringify(packedPackage.name) +
             ";\n" +
             'import { createNodeMtlsTransport } from ' +
             JSON.stringify(`${packedPackage.name}/node`) +
             ";\n\n" +
-            "const transport = createNodeMtlsTransport({ cert: \"cert\", key: \"key\" });\n" +
+            'const transport = createNodeMtlsTransport({ cert: "cert", key: "key" });\n' +
             "const client = createTossMtlsHttpClient({\n" +
             '  baseUrl: "https://example.test",\n' +
             "  fetch: (input, init) => transport.request(String(input), init ?? {}),\n" +
             "  timeoutMs: 0\n" +
             "});\n" +
-            "void client;\n"
+            "if (!(TossMtlsHttpClientError instanceof Error)) {\n" +
+            '  throw new Error("TossMtlsHttpClientError must extend Error");\n' +
+            "}\n" +
+            "void client;\n\n" +
+            "async function consumeIapStatus(orderId: string): Promise<string> {\n" +
+            "  const response: IapOrderStatusResponse = await client.iapOrderStatus({ orderId });\n" +
+            "  if (response.ok === false) {\n" +
+            '    return response.error ?? "provider failure";\n' +
+            "  }\n" +
+            '  return response.verified ? "verified" : response.verificationCode;\n' +
+            "}\n" +
+            "void consumeIapStatus;\n\n" +
+            "// @ts-expect-error baseUrl is a required option\n" +
+            "createTossMtlsHttpClient({});\n"
+        );
+        // The documented injection combination on its own: a /node transport
+        // assigned to api-core's MtlsClient and passed as mtlsClient. Runs
+        // under both resolutions; @ts-expect-error proves the shipped types
+        // reject contract violations (an any-weakened declaration surface
+        // would surface these as unused-directive errors instead).
+        const coreTransportPath = join(installDir, "smoke-core-transport.ts");
+        writeFileSync(
+          coreTransportPath,
+          'import {\n' +
+            "  createTossMtlsCore,\n" +
+            "  type AppsInTossCoreOptions,\n" +
+            "  type IapOrderStatusInput,\n" +
+            "  type IapOrderStatusResponse,\n" +
+            "  type MtlsClient,\n" +
+            "  type SmartMessageSendInput,\n" +
+            "  type TossMtlsCore\n" +
+            '} from "@ait-kit/api-core";\n' +
+            'import { createNodeMtlsTransport } from ' +
+            JSON.stringify(`${packedPackage.name}/node`) +
+            ";\n\n" +
+            'const transport = createNodeMtlsTransport({ cert: "fixture-cert", key: "fixture-key" }) satisfies MtlsClient;\n\n' +
+            'const options: AppsInTossCoreOptions = { mode: "forward", mtlsClient: transport };\n' +
+            "const core: TossMtlsCore = createTossMtlsCore(options);\n\n" +
+            "async function consumeIapStatus(input: IapOrderStatusInput): Promise<string> {\n" +
+            "  const response: IapOrderStatusResponse = await core.iapOrderStatus(input);\n" +
+            "  if (response.ok === false) {\n" +
+            '    return response.error ?? "provider failure";\n' +
+            "  }\n" +
+            "  if (response.verified) {\n" +
+            '    return "verified";\n' +
+            "  }\n" +
+            "  return response.verificationCode;\n" +
+            "}\n" +
+            "void consumeIapStatus;\n\n" +
+            "async function consumeMessage(body: SmartMessageSendInput): Promise<string> {\n" +
+            "  const response = await core.smartMessageSend(body);\n" +
+            '  return response.ok ? (response.resultType ?? "sent") : (response.error ?? "failed");\n' +
+            "}\n" +
+            "void consumeMessage;\n\n" +
+            "// @ts-expect-error a MtlsClient must resolve to a Response, not a number\n" +
+            "const invalidClient: MtlsClient = { request: async () => 42 };\n" +
+            "// @ts-expect-error tossPromotionAmount must be a number\n" +
+            'createTossMtlsCore({ tossPromotionAmount: "500", mtlsClient: transport });\n' +
+            "// @ts-expect-error orderId must be a string\n" +
+            "core.iapOrderStatus({ orderId: 123 });\n" +
+            "async function unguarded(response: IapOrderStatusResponse): Promise<string> {\n" +
+            "  // @ts-expect-error verificationCode requires narrowing to the unverified variant\n" +
+            "  return response.verificationCode;\n" +
+            "}\n" +
+            "void unguarded;\n" +
+            "void invalidClient;\n"
         );
         run(
           "npm",
-          ["install", "--ignore-scripts", "--no-package-lock", "--no-audit", "--no-fund", "typescript@6.0.3"],
+          [
+            "install",
+            "--ignore-scripts",
+            "--no-package-lock",
+            "--no-audit",
+            "--no-fund",
+            `typescript@${CONSUMER_TYPESCRIPT_VERSION}`,
+            `@types/node@${NODE_TYPES_VERSION}`
+          ],
           installDir,
           installCommandTimeoutMs
         );
-        runTsc(installDir, "smoke-node-types.ts", "bundler");
-        runTsc(installDir, "smoke-node-types.ts", "nodenext");
-        runTsc(installDir, "smoke-root-types.ts", "bundler");
+        logTypescriptVersion(installDir, "server declarations, consumer floor");
+        runTsc(installDir, "smoke-node-types.ts", "bundler", NODE_TYPES_TSC_OPTIONS);
+        runTsc(installDir, "smoke-node-types.ts", "nodenext", NODE_TYPES_TSC_OPTIONS);
+        runTsc(installDir, "smoke-root-types.ts", "bundler", NODE_TYPES_TSC_OPTIONS);
+        runTsc(installDir, "smoke-root-types.ts", "nodenext", NODE_TYPES_TSC_OPTIONS);
+        runTsc(installDir, "smoke-core-transport.ts", "bundler", NODE_TYPES_TSC_OPTIONS);
+        runTsc(installDir, "smoke-core-transport.ts", "nodenext", NODE_TYPES_TSC_OPTIONS);
+        // Re-run the same consumer files on the repository's own pinned
+        // TypeScript: a declaration regression only newer tsc flags must
+        // still fail CI.
+        run(
+          "npm",
+          [
+            "install",
+            "--ignore-scripts",
+            "--no-package-lock",
+            "--no-audit",
+            "--no-fund",
+            `typescript@${REPO_TYPESCRIPT_VERSION}`
+          ],
+          installDir,
+          installCommandTimeoutMs
+        );
+        logTypescriptVersion(installDir, "server declarations, repo toolchain");
+        runTsc(installDir, "smoke-node-types.ts", "bundler", NODE_TYPES_TSC_OPTIONS);
+        runTsc(installDir, "smoke-node-types.ts", "nodenext", NODE_TYPES_TSC_OPTIONS);
+        runTsc(installDir, "smoke-root-types.ts", "bundler", NODE_TYPES_TSC_OPTIONS);
+        runTsc(installDir, "smoke-root-types.ts", "nodenext", NODE_TYPES_TSC_OPTIONS);
+        runTsc(installDir, "smoke-core-transport.ts", "bundler", NODE_TYPES_TSC_OPTIONS);
+        runTsc(installDir, "smoke-core-transport.ts", "nodenext", NODE_TYPES_TSC_OPTIONS);
       } finally {
         await mtls.close();
       }
@@ -321,6 +444,12 @@ try {
     if (packedPackage.hasRnExport) {
       verifySdkPlatformIsolation(packedPackage, installDir, tempDir, installCommandTimeoutMs);
       verifySdkOfficialCompatibility(packedPackage, installDir, tempDir, installCommandTimeoutMs);
+    }
+    if (packedPackage.manifest.name === "@ait-kit/api-orpc") {
+      verifyOrpcDeclarations(packedPackage, installDir, installCommandTimeoutMs);
+    }
+    if (packedPackage.manifest.name === "@ait-kit/api-cloudflare-service") {
+      verifyCloudflareServiceDeclarations(packedPackage, installDir, installCommandTimeoutMs);
     }
     console.log(`Verified ${packedPackage.name}@${packedPackage.version}`);
   }
@@ -734,7 +863,7 @@ async function startTarballMtlsServer() {
   };
 }
 
-function runTsc(cwd, file, moduleResolution, lib) {
+function runTsc(cwd, file, moduleResolution, options = {}) {
   const moduleKind = moduleResolution === "bundler" ? "esnext" : moduleResolution;
   const args = [
     "exec",
@@ -749,17 +878,189 @@ function runTsc(cwd, file, moduleResolution, lib) {
     "--moduleResolution",
     moduleResolution
   ];
-  if (lib) {
-    // Official SDK type trees (react-native et al.) are not strict-clean
-    // internally and their RN globals collide with lib.dom; React Native
-    // projects standardly enable skipLibCheck and drop the DOM lib. The
-    // consumer files themselves are still fully checked. Fixture calls
-    // WITHOUT a lib (the stub-SDK checks) keep checking the shipped
-    // declarations in full.
-    args.push("--skipLibCheck", "--lib", lib);
+  if (options.lib) {
+    args.push("--lib", options.lib);
+    if (options.skipLibCheck) {
+      // Official SDK type trees (react-native et al.) are not strict-clean
+      // internally; React Native projects standardly enable skipLibCheck.
+      // Only the legacy SDK fixtures use this — server-declaration fixtures
+      // keep checking the shipped declarations in full.
+      args.push("--skipLibCheck");
+    }
+  }
+  if (options.types) {
+    args.push("--types", options.types);
   }
   args.push(file);
   run("npm", args, cwd);
+}
+
+/** Logs the exact tsc version a fixture directory will use for its checks. */
+function logTypescriptVersion(cwd, label) {
+  const result = run("npm", ["exec", "--", "tsc", "--version"], cwd);
+  console.log(`TypeScript for ${label}: ${(result.stdout || "").trim()}`);
+}
+
+/**
+ * The consumer fixtures must resolve the INSTALLED tarball's declarations,
+ * so assert the installed d.ts really carries extension-safe relative
+ * specifiers — the exact property this verification protects. A pre-fix
+ * tarball installed by mistake fails here immediately instead of producing
+ * confusing downstream TS2834/TS2305 cascades.
+ */
+function assertInstalledDeclarationSpecifiers(installDir, packageName, declarationPath) {
+  const installed = readFileSync(join(installDir, "node_modules", packageName, declarationPath), "utf8");
+  if (!/from "\.\/[a-z][a-z0-9-]*\.js"/.test(installed)) {
+    throw new Error(
+      `Installed ${packageName}/${declarationPath} does not use extension-safe relative specifiers (NodeNext consumers would fail with TS2834)`
+    );
+  }
+}
+
+/**
+ * Checks the installed @ait-kit/api-orpc declarations for an independent
+ * consumer under bundler AND NodeNext resolution. @orpc/server lists
+ * @opentelemetry/api as an optional peer and references it from its shipped
+ * declarations, so without it installed the check reports a TS2307 that is
+ * an EXTERNAL dependency gap, not an api-orpc defect — installing it keeps
+ * this fixture focused on api-orpc's own declaration connectivity.
+ */
+function verifyOrpcDeclarations(packedPackage, installDir, installCommandTimeoutMs) {
+  const fixtureDir = join(installDir, "orpc-types");
+  mkdirSync(fixtureDir, { recursive: true });
+  writeFileSync(join(fixtureDir, "package.json"), JSON.stringify({ private: true, type: "module" }));
+  writeFileSync(
+    join(fixtureDir, "consumer.ts"),
+    'import {\n' +
+      "  healthInputSchema,\n" +
+      "  healthOutputSchema,\n" +
+      "  publicRouter,\n" +
+      "  smartMessageOutputSchema,\n" +
+      "  smartMessageSendInputSchema,\n" +
+      "  type PublicApiContext,\n" +
+      "  type PublicRouter,\n" +
+      "  type PublicRouterInputs,\n" +
+      "  type PublicRouterOutputs\n" +
+      '} from "@ait-kit/api-orpc";\n\n' +
+      "const router: PublicRouter = publicRouter;\n" +
+      "void router;\n" +
+      'type HealthInput = PublicRouterInputs["health"];\n' +
+      'type SmartMessageSendOutput = PublicRouterOutputs["smartMessage"]["send"];\n' +
+      "const healthQuery: HealthInput = healthInputSchema.parse(undefined);\n" +
+      'const messageOutput: SmartMessageSendOutput = smartMessageOutputSchema.parse({ ok: true, providerStatus: "sent" });\n' +
+      "const healthStatus = healthOutputSchema.parse({ ok: true });\n" +
+      "void healthQuery; void messageOutput; void healthStatus;\n" +
+      'const message = smartMessageSendInputSchema.parse({ tossUserKey: "user", templateCode: "TEMPLATE_1", context: {} });\n' +
+      "void message;\n\n" +
+      "// @ts-expect-error tossApi is a required context member\n" +
+      "const brokenContext: PublicApiContext = { tossApi: null };\n" +
+      "void brokenContext;\n"
+  );
+  const installArgs = [
+    "install",
+    "--ignore-scripts",
+    "--no-package-lock",
+    "--no-audit",
+    "--no-fund",
+    "--prefer-offline",
+    packedPackage.tarballPath,
+    ...transitiveLocalDependencyTarballs(packedPackage, packedPackages, localPackageNames),
+    `typescript@${CONSUMER_TYPESCRIPT_VERSION}`,
+    `@types/node@${NODE_TYPES_VERSION}`,
+    "@opentelemetry/api@1.9.1"
+  ];
+  run("npm", installArgs, fixtureDir, installCommandTimeoutMs);
+  assertInstalledDeclarationSpecifiers(fixtureDir, "@ait-kit/api-orpc", "dist/index.d.ts");
+  logTypescriptVersion(fixtureDir, "api-orpc declarations, consumer floor");
+  runTsc(fixtureDir, "consumer.ts", "bundler", NODE_TYPES_TSC_OPTIONS);
+  runTsc(fixtureDir, "consumer.ts", "nodenext", NODE_TYPES_TSC_OPTIONS);
+  run(
+    "npm",
+    [
+      "install",
+      "--ignore-scripts",
+      "--no-package-lock",
+      "--no-audit",
+      "--no-fund",
+      `typescript@${REPO_TYPESCRIPT_VERSION}`
+    ],
+    fixtureDir,
+    installCommandTimeoutMs
+  );
+  logTypescriptVersion(fixtureDir, "api-orpc declarations, repo toolchain");
+  runTsc(fixtureDir, "consumer.ts", "bundler", NODE_TYPES_TSC_OPTIONS);
+  runTsc(fixtureDir, "consumer.ts", "nodenext", NODE_TYPES_TSC_OPTIONS);
+}
+
+/**
+ * Checks the installed @ait-kit/api-cloudflare-service declarations in a
+ * Worker-typed consumer environment (official @cloudflare/workers-types,
+ * DOM-free lib) under bundler AND NodeNext resolution. This verifies
+ * declaration connectivity only — it does not attempt to run Worker code in
+ * a plain Node process.
+ */
+function verifyCloudflareServiceDeclarations(packedPackage, installDir, installCommandTimeoutMs) {
+  const fixtureDir = join(installDir, "cloudflare-types");
+  mkdirSync(fixtureDir, { recursive: true });
+  writeFileSync(join(fixtureDir, "package.json"), JSON.stringify({ private: true, type: "module" }));
+  writeFileSync(
+    join(fixtureDir, "consumer.ts"),
+    'import {\n' +
+      "  AppsInTossApiService,\n" +
+      "  createCloudflareMtlsClient,\n" +
+      "  createServiceRpc,\n" +
+      "  type AppsInTossServiceEnv\n" +
+      '} from "@ait-kit/api-cloudflare-service";\n' +
+      'import type { MtlsClient } from "@ait-kit/api-core";\n\n' +
+      "const env: AppsInTossServiceEnv = {\n" +
+      '  TOSS_API_MODE: "stub",\n' +
+      '  TOSS_API_BASE_URL: "https://example.test"\n' +
+      "};\n" +
+      "const rpc = createServiceRpc(env);\n" +
+      "void rpc;\n\n" +
+      "const transport: MtlsClient = createCloudflareMtlsClient({ fetch: (input, init) => fetch(input, init) });\n" +
+      "void transport;\n\n" +
+      "class MyTossService extends AppsInTossApiService {}\n" +
+      "void MyTossService;\n\n" +
+      "// @ts-expect-error TOSS_API_BASE_URL must be a string\n" +
+      "createServiceRpc({ TOSS_API_BASE_URL: 123 });\n" +
+      "// @ts-expect-error a MtlsClient must resolve to a Response, not a number\n" +
+      "const badTransport: MtlsClient = { request: async () => 42 };\n" +
+      "void badTransport;\n"
+  );
+  const installArgs = [
+    "install",
+    "--ignore-scripts",
+    "--no-package-lock",
+    "--no-audit",
+    "--no-fund",
+    "--prefer-offline",
+    packedPackage.tarballPath,
+    ...transitiveLocalDependencyTarballs(packedPackage, packedPackages, localPackageNames),
+    `typescript@${CONSUMER_TYPESCRIPT_VERSION}`,
+    `@cloudflare/workers-types@${WORKERS_TYPES_VERSION}`
+  ];
+  run("npm", installArgs, fixtureDir, installCommandTimeoutMs);
+  assertInstalledDeclarationSpecifiers(fixtureDir, "@ait-kit/api-cloudflare-service", "dist/index.d.ts");
+  logTypescriptVersion(fixtureDir, "api-cloudflare-service declarations, consumer floor");
+  runTsc(fixtureDir, "consumer.ts", "bundler", WORKER_TYPES_TSC_OPTIONS);
+  runTsc(fixtureDir, "consumer.ts", "nodenext", WORKER_TYPES_TSC_OPTIONS);
+  run(
+    "npm",
+    [
+      "install",
+      "--ignore-scripts",
+      "--no-package-lock",
+      "--no-audit",
+      "--no-fund",
+      `typescript@${REPO_TYPESCRIPT_VERSION}`
+    ],
+    fixtureDir,
+    installCommandTimeoutMs
+  );
+  logTypescriptVersion(fixtureDir, "api-cloudflare-service declarations, repo toolchain");
+  runTsc(fixtureDir, "consumer.ts", "bundler", WORKER_TYPES_TSC_OPTIONS);
+  runTsc(fixtureDir, "consumer.ts", "nodenext", WORKER_TYPES_TSC_OPTIONS);
 }
 
 /**
@@ -1193,9 +1494,9 @@ export default BrickModule;
       fixtureDir,
       installCommandTimeoutMs
     );
-    runTsc(fixtureDir, "official-types.ts", "bundler", fixture.tscLib);
-    runTsc(fixtureDir, "official-types.ts", "nodenext", fixture.tscLib);
-    runTsc(fixtureDir, "runtime.ts", "bundler", fixture.tscLib);
+    runTsc(fixtureDir, "official-types.ts", "bundler", { lib: fixture.tscLib, skipLibCheck: true });
+    runTsc(fixtureDir, "official-types.ts", "nodenext", { lib: fixture.tscLib, skipLibCheck: true });
+    runTsc(fixtureDir, "runtime.ts", "bundler", { lib: fixture.tscLib, skipLibCheck: true });
     run("npm", ["exec", "--", "esbuild", ...fixture.bundleArgs(fixtureDir)], fixtureDir);
     run(process.execPath, [join(fixtureDir, "runtime.bundle.mjs")], fixtureDir);
   }

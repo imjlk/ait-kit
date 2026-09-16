@@ -1,6 +1,6 @@
 import type { AppsInTossApiRpc } from "@ait-kit/api-core";
 import type { InferRouterInputs, InferRouterOutputs, RouterClient } from "@orpc/server";
-import type { PublicRouter } from "./public-router";
+import type { PublicRouter } from "./public-router.js";
 
 export interface PublicApiContext {
   tossApi: AppsInTossApiRpc;

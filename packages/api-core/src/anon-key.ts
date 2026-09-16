@@ -1,17 +1,17 @@
-import { requestToss } from "./mtls-client";
+import { requestToss } from "./mtls-client.js";
 import {
   httpStatusOk,
   isUpstreamFailure,
   objectOrSelf,
   upstreamFailureCode,
   upstreamFailureReason
-} from "./toss-envelope";
+} from "./toss-envelope.js";
 import {
   TOSS_ENDPOINTS,
   type AnonKeyVerifyInput,
   type AnonKeyVerifyResponse,
   type NormalizedAppsInTossCoreOptions
-} from "./types";
+} from "./types.js";
 
 /**
  * Verifies an anonymous key against the official

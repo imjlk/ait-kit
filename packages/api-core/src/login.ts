@@ -1,4 +1,4 @@
-import { requestToss } from "./mtls-client";
+import { requestToss } from "./mtls-client.js";
 import {
   debugLog,
   isUpstreamFailure,
@@ -13,7 +13,7 @@ import {
   upstreamFailureReason,
   upstreamFailureCode,
   httpStatusOk
-} from "./toss-envelope";
+} from "./toss-envelope.js";
 import {
   TOSS_ENDPOINTS,
   type NormalizedAppsInTossCoreOptions,
@@ -21,7 +21,7 @@ import {
   type TossLoginCompleteResponse,
   type TossLoginRemoveByUserKeyInput,
   type TossLoginRemoveByUserKeyResponse
-} from "./types";
+} from "./types.js";
 
 export async function completeTossLogin(
   body: TossLoginCompleteInput,

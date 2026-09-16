@@ -1,6 +1,6 @@
 import { createAppsInTossApi, createAppsInTossApiRpc, parseNonNegativeInteger, parsePositiveInteger } from "@ait-kit/api-core";
 import type { AppsInTossApiRpc, AppsInTossApiMode } from "@ait-kit/api-core";
-import { createCloudflareMtlsClient, type CloudflareFetcher } from "./mtls";
+import { createCloudflareMtlsClient, type CloudflareFetcher } from "./mtls.js";
 
 export interface AppsInTossServiceEnv {
   TOSS_CERT?: CloudflareFetcher;

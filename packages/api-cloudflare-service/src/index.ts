@@ -24,9 +24,9 @@ import type {
   TossLoginRemoveByUserKeyInput,
   TossLoginRemoveByUserKeyResponse
 } from "@ait-kit/api-core";
-import { createServiceRpc, type AppsInTossServiceEnv } from "./context";
-import { handleFetchFallback } from "./fetch-fallback";
-import { createCloudflareMtlsClient } from "./mtls";
+import { createServiceRpc, type AppsInTossServiceEnv } from "./context.js";
+import { handleFetchFallback } from "./fetch-fallback.js";
+import { createCloudflareMtlsClient } from "./mtls.js";
 
 export class AppsInTossApiService extends WorkerEntrypoint<AppsInTossServiceEnv> implements AppsInTossApiRpc {
   fetch(request: Request): Promise<Response> {

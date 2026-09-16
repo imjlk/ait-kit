@@ -1,4 +1,4 @@
-import { clientError, objectOrSelf } from "./toss-envelope";
+import { clientError, objectOrSelf } from "./toss-envelope.js";
 
 /**
  * A message recipient, normalized to exactly one identifier kind.

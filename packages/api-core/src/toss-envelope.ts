@@ -5,7 +5,7 @@ import {
   type AppsInTossCoreOptions,
   type AppsInTossApiMode,
   type NormalizedAppsInTossCoreOptions
-} from "./types";
+} from "./types.js";
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
