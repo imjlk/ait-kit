@@ -75,7 +75,9 @@ await check("semver satisfaction matches the internal ranges", async () => {
     ["0.5.0", "~0.4.1", false],
     ["0.0.2", "^0.0.1", false],
     ["1.9.0", "^1.2.3", true],
-    ["2.0.0", "^1.2.3", false]
+    ["2.0.0", "^1.2.3", false],
+    ["0.4.2-beta.1", "^0.4.1", false],
+    ["1.2.3-beta.1", "1.2.3-beta.1", true]
   ];
   for (const [version, range, expected] of cases) {
     if (satisfiesSimpleSemver(version, range) !== expected) {
@@ -180,8 +182,14 @@ for (const fixture of scenarioFixtures) {
     }
     const scenarioName = fixture.expect.split(":")[1];
     const scenario = result.scenarios.find((s) => s.name === scenarioName);
+    const failed = result.scenarios.filter((s) => !s.ok);
     if (result.pass || !scenario || scenario.ok) {
       throw new Error(`expected scenario ${scenarioName} to fail, got: ${JSON.stringify(result.scenarios)}`);
+    }
+    // Each broken fixture overrides exactly one route: pin that only the
+    // targeted scenario fails, so the fixtures cannot silently broaden.
+    if (failed.length !== 1) {
+      throw new Error(`expected exactly one failing scenario, got: ${JSON.stringify(failed)}`);
     }
   });
 }
@@ -229,22 +237,35 @@ await check("server material generation failure propagates and cleans the temp d
   }
 });
 
-await check("install failure cleans the consumer project and reports the failing phase", async () => {
-  const before = tmpSnapshot("ait-kit-published-verify-");
+await check("resolve failure reports the resolve phase and cleans temporary state", async () => {
+  // An unknown version on the REAL registry fails during resolve (E404,
+  // single attempt) — the consumer project may or may not exist yet, and
+  // nothing may be left behind either way.
+  const before = [...tmpSnapshot("ait-kit-published-verify-"), ...tmpSnapshot("ait-kit-mtls-verify-")];
   let report;
   try {
-    await verifyPublishedNodeTransport({ version: "0.4.1", registry: "http://127.0.0.1:9/" });
-    throw new Error("expected the unreachable-registry install to fail");
+    await verifyPublishedNodeTransport({
+      version: "99.99.99",
+      registry: "https://registry.npmjs.org/",
+      resolveAttempts: 1
+    });
+    throw new Error("expected the unknown-version resolve to fail");
   } catch (error) {
     report = error.report;
-    if (!report || !["resolve", "install"].includes(report.failurePhase)) {
+    if (!report || report.failurePhase !== "resolve") {
       throw new Error(`unexpected failure phase: ${report?.failurePhase} (${report?.failureMessage})`);
     }
   }
-  const leaked = [...tmpSnapshot("ait-kit-published-verify-")].filter((entry) => !before.has(entry));
+  const leaked = [...tmpSnapshot("ait-kit-published-verify-"), ...tmpSnapshot("ait-kit-mtls-verify-")].filter(
+    (entry) => !before.has(entry)
+  );
   if (leaked.length > 0) {
-    for (const entry of leaked) rmSync(join(tmpdir(), entry), { recursive: true, force: true });
-    throw new Error(`consumer project directories leaked after failure: ${leaked.join(", ")}`);
+    for (const prefix of ["ait-kit-published-verify-", "ait-kit-mtls-verify-"]) {
+      for (const entry of leaked.filter((e) => e.startsWith(prefix))) {
+        rmSync(join(tmpdir(), entry), { recursive: true, force: true });
+      }
+    }
+    throw new Error(`temporary directories leaked after the failure: ${leaked.join(", ")}`);
   }
 });
 

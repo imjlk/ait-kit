@@ -61,7 +61,9 @@ export function parseExactVersion(value) {
 
 /**
  * Minimal semver satisfies for the shapes this repo publishes internally
- * (exact, ^, ~). Not a general semver implementation.
+ * (exact, ^, ~). Not a general semver implementation: prerelease versions
+ * only satisfy an exact match on the identical string, and build metadata
+ * is not compared.
  */
 export function satisfiesSimpleSemver(version, range) {
   const exact = /^v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/.exec(range.trim());
@@ -70,10 +72,12 @@ export function satisfiesSimpleSemver(version, range) {
   if (!comparator) {
     throw new VerificationError("verify", `unsupported internal dependency range: ${range}`);
   }
+  if (version.includes("-") || version.includes("+")) {
+    return false;
+  }
   const [, operator, majorRaw, minorRaw, patchRaw] = comparator;
   const [major, minor, patch] = [majorRaw, minorRaw, patchRaw].map(Number);
-  const parts = version.split("-")[0].split(".").map(Number);
-  const [vMajor, vMinor, vPatch] = parts;
+  const [vMajor, vMinor, vPatch] = version.split(".").map(Number);
   const below = vMajor < major || (vMajor === major && vMinor < minor) || (vMajor === major && vMinor === minor && vPatch < patch);
   if (below) return false;
   if (operator === "~") {
@@ -96,43 +100,49 @@ export function isInsideDirectory(filePath, directory) {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-function run(command, args, cwd, timeoutMs) {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8", timeout: timeoutMs });
+function run(command, args, cwd, timeoutMs, phase = "install") {
+  // npm is npm.cmd on Windows; same guard the tarball checks use.
+  const executable = process.platform === "win32" && command === "npm" ? "npm.cmd" : command;
+  const result = spawnSync(executable, args, { cwd, encoding: "utf8", timeout: timeoutMs });
   if (result.error?.code === "ETIMEDOUT") {
-    throw new VerificationError("install", `${command} ${args.join(" ")} timed out after ${timeoutMs / 1000}s`);
+    throw new VerificationError(phase, `${command} ${args.join(" ")} timed out after ${timeoutMs / 1000}s`);
   }
   if (result.error) {
-    throw new VerificationError("install", `${command} ${args.join(" ")} failed to spawn: ${result.error.message}`);
+    throw new VerificationError(phase, `${command} ${args.join(" ")} failed to spawn: ${result.error.message}`);
   }
   return result;
 }
 
-async function resolveRegistryMetadata(version, registry) {
+export async function resolveRegistryMetadata(version, registry, resolveAttempts = RESOLVE_ATTEMPTS) {
   let lastOutput = "";
-  for (let attempt = 1; attempt <= RESOLVE_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= resolveAttempts; attempt += 1) {
     const result = run(
       "npm",
       ["view", `${PACKAGE_NAME}@${version}`, "version", "dist.tarball", "--registry", registry, "--json"],
       undefined,
-      60_000
+      60_000,
+      "resolve"
     );
     if (result.status === 0) {
       return JSON.parse(result.stdout);
     }
     lastOutput = `${result.stdout || ""}${result.stderr || ""}`;
-    // Retry ONLY propagation-style misses and transient transport errors.
-    // Permission (E401/E403), integrity (EINTEGRITY), and anything unknown
-    // fail immediately — never infinite, never a fallback version.
+    // Retry ONLY propagation-style misses (E404 right after a publish) and
+    // transport-level transients (DNS, resets). Connection-refused is
+    // deliberately NOT retried here: npm already retries it internally for
+    // longer than this tool's per-attempt cap, so retrying again would only
+    // multiply the wait. Permission (E401/E403), integrity (EINTEGRITY),
+    // and anything unknown fail immediately — never a fallback version.
     const transient = /E404|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN|network/i.test(lastOutput);
-    if (!transient || attempt === RESOLVE_ATTEMPTS) {
+    if (!transient || attempt === resolveAttempts) {
       throw new VerificationError(
         "resolve",
         `npm view ${PACKAGE_NAME}@${version} failed (status ${result.status})${
-          transient ? ` after ${RESOLVE_ATTEMPTS} attempts` : ""
+          transient ? ` after ${resolveAttempts} attempts` : ""
         }: ${lastOutput.trim().slice(0, 500)}`
       );
     }
-    console.log(`registry has not surfaced ${PACKAGE_NAME}@${version} yet; retrying (${attempt}/${RESOLVE_ATTEMPTS})...`);
+    console.log(`registry has not surfaced ${PACKAGE_NAME}@${version} yet; retrying (${attempt}/${resolveAttempts})...`);
     await new Promise((resolve) => setTimeout(resolve, RESOLVE_RETRY_DELAY_MS));
   }
   throw new VerificationError("resolve", "unreachable");
@@ -172,7 +182,13 @@ function writeConsumerRunner(projectDir) {
   return runnerPath;
 }
 
-export async function verifyPublishedNodeTransport({ version, registry, reportPath, onLog = () => {} }) {
+export async function verifyPublishedNodeTransport({
+  version,
+  registry,
+  reportPath,
+  resolveAttempts,
+  onLog = () => {}
+}) {
   const exact = parseExactVersion(version);
   const report = {
     timestamp: new Date().toISOString(),
@@ -199,7 +215,7 @@ export async function verifyPublishedNodeTransport({ version, registry, reportPa
   let mtls;
   try {
     onLog(`resolving ${PACKAGE_NAME}@${exact} on ${registry}...`);
-    const metadata = await resolveRegistryMetadata(exact, registry);
+    const metadata = await resolveRegistryMetadata(exact, registry, resolveAttempts);
     report.registryTarball = typeof metadata?.["dist.tarball"] === "string" ? metadata["dist.tarball"] : null;
 
     // Isolated consumer project OUTSIDE the repository.
@@ -280,12 +296,24 @@ export async function verifyPublishedNodeTransport({ version, registry, reportPa
       throw new VerificationError("contract", `consumer exceeded its ${CHILD_TIMEOUT_MS / 1000}s budget (watchdog kill)`);
     }
     if (child.status !== 0) {
+      // The consumer prints its JSON payload before exiting non-zero; a
+      // wrong-target resolution is a VERIFY failure, not a contract one.
+      const payload = parseConsumerPayload(child.stdout);
+      if (payload && payload.insideInstallRoot === false) {
+        report.moduleResolution = {
+          requestedSpecifier: ENTRYPOINT,
+          resolvedUrl: payload.resolvedUrl,
+          resolvedPath: payload.resolvedPath,
+          insideInstallRoot: false
+        };
+        throw new VerificationError("verify", `resolved module is not inside the installed package: ${payload.resolvedPath}`);
+      }
       throw new VerificationError("contract", `consumer exited with ${child.status ?? `signal ${child.signal}`}`);
     }
 
     // Parse the consumer's JSON result — success is decided from the actual
     // scenario outcomes and module resolution, never from message text.
-    const payload = JSON.parse((child.stdout || "").trim().split("\n").pop());
+    const payload = parseConsumerPayload(child.stdout);
     report.moduleResolution = {
       requestedSpecifier: ENTRYPOINT,
       resolvedUrl: payload.resolvedUrl,
@@ -325,6 +353,14 @@ export async function verifyPublishedNodeTransport({ version, registry, reportPa
     if (projectDir) {
       rmSync(projectDir, { recursive: true, force: true });
     }
+  }
+}
+
+function parseConsumerPayload(stdout) {
+  try {
+    return JSON.parse((stdout || "").trim().split("\n").pop());
+  } catch {
+    return null;
   }
 }
 
