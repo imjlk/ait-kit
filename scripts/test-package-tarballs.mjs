@@ -686,8 +686,15 @@ async function startTarballMtlsServer() {
     [join(rootDir, "packages/api-client/test/helpers/mtls-test-server.mjs"), dir, "0"],
     { stdio: ["ignore", "pipe", "inherit"] }
   );
+  // Startup-failure cleanup must kill the orphaned child and remove the
+  // generated key material; once readiness settles it must not fire again.
+  let settled = false;
   const port = await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("tarball mTLS server did not start")), 10_000);
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      rmSync(dir, { recursive: true, force: true });
+      reject(new Error("tarball mTLS server did not start"));
+    }, 10_000);
     child.stdout.on("data", (chunk) => {
       const match = /ready:(\d+)/.exec(chunk.toString());
       if (match) {
@@ -695,7 +702,15 @@ async function startTarballMtlsServer() {
         resolve(Number(match[1]));
       }
     });
-    child.on("exit", (code) => reject(new Error(`tarball mTLS server exited early: ${code}`)));
+    child.on("exit", (code) => {
+      clearTimeout(timeout);
+      if (!settled) {
+        rmSync(dir, { recursive: true, force: true });
+        reject(new Error(`tarball mTLS server exited early: ${code}`));
+      }
+    });
+  }).finally(() => {
+    settled = true;
   });
   return {
     baseUrl: `https://localhost:${port}`,
@@ -705,11 +720,14 @@ async function startTarballMtlsServer() {
     close: async () => {
       child.kill("SIGTERM");
       await new Promise((resolve) => {
-        child.on("exit", resolve);
-        setTimeout(() => {
+        const forceKill = setTimeout(() => {
           child.kill("SIGKILL");
           resolve();
         }, 2_000);
+        child.on("exit", () => {
+          clearTimeout(forceKill);
+          resolve();
+        });
       });
       rmSync(dir, { recursive: true, force: true });
     }
