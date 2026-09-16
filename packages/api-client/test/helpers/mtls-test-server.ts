@@ -48,15 +48,30 @@ export async function startMtlsTestServer(): Promise<MtlsTestServer> {
   });
 
   const port = await new Promise<number>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("mTLS test server did not start")), 10_000);
+    // Buffer stdout: a `ready:<port>` line may split across data events.
+    let stdoutBuffer = "";
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("mTLS test server did not start"));
+    }, 10_000);
     child.stdout!.on("data", (chunk: Buffer) => {
-      const match = /ready:(\d+)/.exec(chunk.toString());
+      stdoutBuffer += chunk.toString();
+      const match = /ready:(\d+)/.exec(stdoutBuffer);
       if (match) {
         clearTimeout(timeout);
         resolve(Number(match[1]));
       }
     });
-    child.on("exit", (code) => reject(new Error(`mTLS test server exited early: ${code}`)));
+    // A failed spawn emits 'error' asynchronously; without a listener it
+    // would crash the test process as an uncaught exception.
+    child.once("error", (error: Error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`mTLS test server exited early: ${code}`));
+    });
   });
 
   return {
