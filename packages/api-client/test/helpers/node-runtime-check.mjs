@@ -3,54 +3,43 @@
 // test asserts a zero exit code; any uncaught exception fails naturally via
 // the process exit code, so no global handlers are installed.
 //
+// Thin entry point: it only loads the built module, hands it to the shared
+// contract scenarios, and maps the result to an exit code. The scenarios
+// themselves live in mtls-contract-check.mjs and are shared with the
+// tarball and npm-release verification targets.
+//
 // Usage: node node-runtime-check.mjs <baseUrl> <caPath> <certPath> <keyPath>
 import { readFileSync } from "node:fs";
 import {
   createNodeMtlsTransport,
   NodeMtlsTransportError
 } from "../../dist/node/index.js";
+import { runMtlsContractChecks } from "./mtls-contract-check.mjs";
 
 const [baseUrl, caPath, certPath, keyPath] = process.argv.slice(2);
 if (!baseUrl || !caPath || !certPath || !keyPath) {
   throw new Error("usage: node-runtime-check.mjs <baseUrl> <caPath> <certPath> <keyPath>");
 }
 
-const transport = createNodeMtlsTransport({
+const result = await runMtlsContractChecks({
+  createNodeMtlsTransport,
+  NodeMtlsTransportError,
+  baseUrl,
+  // Private materials are read from the temporary files the test server
+  // generated; they are never printed.
+  ca: readFileSync(caPath, "utf8"),
   cert: readFileSync(certPath, "utf8"),
   key: readFileSync(keyPath, "utf8"),
-  ca: readFileSync(caPath, "utf8")
+  expectedClientCn: "ait-kit-test-client"
 });
 
-// 1) Normal mutually authenticated request.
-const ok = await transport.request(`${baseUrl}/immediate`, { method: "GET" });
-if (ok.status !== 200) {
-  throw new Error(`expected the normal request to return 200, got ${ok.status}`);
-}
-
-// 2) Core regression: a completed body whose fetch Response conversion
-//    throws (status 600 is outside the Fetch status range) must reject as a
-//    typed REQUEST_FAILED with the original exception preserved as cause —
-//    never an uncaught exception, a TIMEOUT, or a pending promise.
-let conversionError;
-try {
-  await transport.request(`${baseUrl}/status?code=600`, { method: "GET" });
-} catch (error) {
-  conversionError = error;
-}
-if (
-  !(conversionError instanceof NodeMtlsTransportError) ||
-  conversionError.code !== "REQUEST_FAILED" ||
-  !(conversionError.cause instanceof Error)
-) {
-  throw new Error(
-    `status 600 did not reject as a typed conversion failure: ${String(conversionError)}`
-  );
-}
-
-// 3) The same transport instance keeps serving requests after the failure.
-const next = await transport.request(`${baseUrl}/immediate`, { method: "GET" });
-if (next.status !== 200) {
-  throw new Error(`expected the post-failure request to return 200, got ${next.status}`);
+if (!result.pass) {
+  for (const scenario of result.scenarios) {
+    if (!scenario.ok) {
+      console.error(`FAIL ${scenario.name}: ${scenario.detail}`);
+    }
+  }
+  process.exit(1);
 }
 
 console.log("PASS");
