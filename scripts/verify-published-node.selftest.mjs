@@ -14,7 +14,8 @@ import {
   isInsideDirectory,
   parseExactVersion,
   satisfiesSimpleSemver,
-  verifyPublishedNodeTransport
+  verifyPublishedNodeTransport,
+  VerificationError
 } from "./verify-published-node.mjs";
 import { startMtlsServer } from "./lib/start-mtls-server.mjs";
 import { runMtlsContractChecks } from "../packages/api-client/test/helpers/mtls-contract-check.mjs";
@@ -238,16 +239,19 @@ await check("server material generation failure propagates and cleans the temp d
 });
 
 await check("resolve failure reports the resolve phase and cleans temporary state", async () => {
-  // An unknown version on the REAL registry fails during resolve (E404,
-  // single attempt) — the consumer project may or may not exist yet, and
-  // nothing may be left behind either way.
+  // A deterministic resolve failure (offline fixture, no live registry):
+  // the consumer project may or may not exist yet, and nothing may be left
+  // behind either way. The live-registry variant of this path is covered
+  // by the CLI end-to-end check above.
   const before = [...tmpSnapshot("ait-kit-published-verify-"), ...tmpSnapshot("ait-kit-mtls-verify-")];
   let report;
   try {
     await verifyPublishedNodeTransport({
       version: "99.99.99",
       registry: "https://registry.npmjs.org/",
-      resolveAttempts: 1
+      resolveMetadata: async () => {
+        throw new VerificationError("resolve", "fixture: version not found");
+      }
     });
     throw new Error("expected the unknown-version resolve to fail");
   } catch (error) {
@@ -260,10 +264,8 @@ await check("resolve failure reports the resolve phase and cleans temporary stat
     (entry) => !before.has(entry)
   );
   if (leaked.length > 0) {
-    for (const prefix of ["ait-kit-published-verify-", "ait-kit-mtls-verify-"]) {
-      for (const entry of leaked.filter((e) => e.startsWith(prefix))) {
-        rmSync(join(tmpdir(), entry), { recursive: true, force: true });
-      }
+    for (const entry of leaked) {
+      rmSync(join(tmpdir(), entry), { recursive: true, force: true });
     }
     throw new Error(`temporary directories leaked after the failure: ${leaked.join(", ")}`);
   }

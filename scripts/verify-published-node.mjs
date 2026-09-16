@@ -36,7 +36,7 @@ const RESOLVE_RETRY_DELAY_MS = 10_000;
 // Finite budget for the whole consumer child (install→scenario run).
 const CHILD_TIMEOUT_MS = positiveIntEnv("AIT_PUBLISHED_VERIFY_TIMEOUT_MS", 120_000);
 
-class VerificationError extends Error {
+export class VerificationError extends Error {
   constructor(phase, message, options) {
     super(message, options);
     this.name = "VerificationError";
@@ -187,6 +187,10 @@ export async function verifyPublishedNodeTransport({
   registry,
   reportPath,
   resolveAttempts,
+  // Test seam ONLY: replaces the npm registry lookup with a deterministic
+  // fixture so the selftest can exercise resolve failures offline. The
+  // real command path never sets it.
+  resolveMetadata,
   onLog = () => {}
 }) {
   const exact = parseExactVersion(version);
@@ -215,7 +219,9 @@ export async function verifyPublishedNodeTransport({
   let mtls;
   try {
     onLog(`resolving ${PACKAGE_NAME}@${exact} on ${registry}...`);
-    const metadata = await resolveRegistryMetadata(exact, registry, resolveAttempts);
+    const metadata = resolveMetadata
+      ? await resolveMetadata(exact, registry)
+      : await resolveRegistryMetadata(exact, registry, resolveAttempts);
     report.registryTarball = typeof metadata?.["dist.tarball"] === "string" ? metadata["dist.tarball"] : null;
 
     // Isolated consumer project OUTSIDE the repository.
@@ -423,7 +429,8 @@ function parseCliArgs(argv) {
 }
 
 export function defaultRegistry() {
-  const result = spawnSync("npm", ["config", "get", "registry"], { encoding: "utf8" });
+  const executable = process.platform === "win32" ? "npm.cmd" : "npm";
+  const result = spawnSync(executable, ["config", "get", "registry"], { encoding: "utf8" });
   return result.status === 0 ? result.stdout.trim() : "https://registry.npmjs.org/";
 }
 

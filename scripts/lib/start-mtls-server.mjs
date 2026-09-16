@@ -52,17 +52,26 @@ export async function startMtlsServer({ clientCn = "ait-kit-verify-client" } = {
     // generated key material; once readiness settles it must not fire again.
     let settled = false;
     const port = await new Promise((resolve, reject) => {
+      // Buffer stdout: a `ready:<port>` line may split across data events.
+      let stdoutBuffer = "";
       const timeout = setTimeout(() => {
         child.kill("SIGKILL");
         rmSync(dir, { recursive: true, force: true });
         reject(new Error("mTLS verification server did not start"));
       }, 10_000);
       child.stdout.on("data", (chunk) => {
-        const match = /ready:(\d+)/.exec(chunk.toString());
+        stdoutBuffer += chunk.toString();
+        const match = /ready:(\d+)/.exec(stdoutBuffer);
         if (match) {
           clearTimeout(timeout);
           resolve(Number(match[1]));
         }
+      });
+      // A failed spawn emits 'error' asynchronously; without a listener it
+      // would escape the surrounding try as an uncaught exception.
+      child.once("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
       });
       child.on("exit", (code) => {
         clearTimeout(timeout);
