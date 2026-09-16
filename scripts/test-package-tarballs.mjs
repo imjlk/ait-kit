@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { repoFileUrl, startMtlsServer } from "./lib/start-mtls-server.mjs";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const commandTimeoutMs = positiveTimeout(process.env.AIT_PACKAGE_SMOKE_TIMEOUT_MS, 120_000);
@@ -214,66 +215,43 @@ try {
       );
       run(process.execPath, [nodeSmokePath], installDir);
 
-      // Full mTLS lifecycle from the INSTALLED tarball against a real local
-      // mTLS server: a normal 200 request, an overall-deadline failure, the
-      // status-600 response-conversion regression (typed REQUEST_FAILED
-      // with the cause preserved), and a successful follow-up on the same
-      // transport. Connection-refused smokes alone do not verify the mTLS
-      // lifecycle or response conversion.
-      const mtls = await startTarballMtlsServer();
+      // Full mTLS contract from the INSTALLED tarball against a real local
+      // mTLS server, through the SAME shared scenarios the repo-build and
+      // npm-release checks use (packages/api-client/test/helpers/
+      // mtls-contract-check.mjs). The generated consumer is intentionally
+      // thin: import the public /node export, read the certificate PATHS it
+      // was handed (private material never travels through argv), delegate
+      // to the shared scenarios, and report via JSON + exit code.
+      // Connection-refused smokes alone do not verify the mTLS lifecycle or
+      // response conversion.
+      const mtls = await startMtlsServer({ clientCn: "ait-kit-tarball-client" });
       try {
         const nodeMtlsSmokePath = join(installDir, "smoke-node-mtls.mjs");
         writeFileSync(
           nodeMtlsSmokePath,
-          [
+          'import { readFileSync } from "node:fs";\n' +
             'import { createNodeMtlsTransport, NodeMtlsTransportError } from ' +
-              JSON.stringify(`${packedPackage.name}/node`) +
-              ";",
-            "const [baseUrl, ca, cert, key] = JSON.parse(process.argv[2]);",
-            "",
-            "const transport = createNodeMtlsTransport({ ca, cert, key });",
-            'const ok = await transport.request(baseUrl + "/immediate", { method: "GET" });',
-            "if (ok.status !== 200) {",
-            '  throw new Error("normal request returned " + ok.status + ", expected 200");',
-            "}",
-            "",
-            "const deadline = createNodeMtlsTransport({ ca, cert, key, timeoutMs: 300 });",
-            "try {",
-            '  await deadline.request(baseUrl + "/hang-headers", { method: "GET" });',
-            '  throw new Error("expected the hung server to time out");',
-            "} catch (error) {",
-            '  if (!(error instanceof NodeMtlsTransportError) || error.code !== "TIMEOUT") {',
-            '    throw new Error("hang-headers rejected with " + String(error) + ", expected TIMEOUT");',
-            "  }",
-            "}",
-            "",
-            "let conversionError;",
-            "try {",
-            '  await transport.request(baseUrl + "/status?code=600", { method: "GET" });',
-            "} catch (error) {",
-            "  conversionError = error;",
-            "}",
-            "if (",
-            "  !(conversionError instanceof NodeMtlsTransportError) ||",
-            '  conversionError.code !== "REQUEST_FAILED" ||',
-            "  !(conversionError.cause instanceof Error)",
-            ") {",
-            '  throw new Error(',
-            '    "status 600 rejected with " + String(conversionError) +',
-            '    ", expected a typed REQUEST_FAILED conversion failure"',
-            "  );",
-            "}",
-            "",
-            'const next = await transport.request(baseUrl + "/immediate", { method: "GET" });',
-            "if (next.status !== 200) {",
-            '  throw new Error("post-failure request returned " + next.status + ", expected 200");',
-            "}",
-            'console.log("SMOKE-MTLS-PASS");'
-          ].join("\n") + "\n"
+            JSON.stringify(`${packedPackage.name}/node`) +
+            ";\n" +
+            "import { runMtlsContractChecks } from " +
+            JSON.stringify(repoFileUrl("packages/api-client/test/helpers/mtls-contract-check.mjs")) +
+            ";\n\n" +
+            "const [baseUrl, caPath, certPath, keyPath] = process.argv.slice(2);\n" +
+            "const result = await runMtlsContractChecks({\n" +
+            "  createNodeMtlsTransport,\n" +
+            "  NodeMtlsTransportError,\n" +
+            "  baseUrl,\n" +
+            '  ca: readFileSync(caPath, "utf8"),\n' +
+            '  cert: readFileSync(certPath, "utf8"),\n' +
+            '  key: readFileSync(keyPath, "utf8"),\n' +
+            '  expectedClientCn: "ait-kit-tarball-client"\n' +
+            "});\n" +
+            "console.log(JSON.stringify(result));\n" +
+            "process.exit(result.pass ? 0 : 1);\n"
         );
         run(
           process.execPath,
-          [nodeMtlsSmokePath, JSON.stringify([mtls.baseUrl, mtls.ca, mtls.clientCert, mtls.clientKey])],
+          [nodeMtlsSmokePath, mtls.baseUrl, mtls.caPath, mtls.certPath, mtls.keyPath],
           installDir
         );
 
@@ -297,10 +275,11 @@ try {
             "  maxResponseBytes: 1024\n" +
             "};\n" +
             "const transport = createNodeMtlsTransport(options);\n" +
-            "if (!(NodeMtlsTransportError instanceof Error)) {\n" +
-            '  throw new Error("NodeMtlsTransportError must extend Error");\n' +
-            "}\n" +
-            "void transport;\n\n" +
+            // Constructing the error type-checks the constructor signature;
+            // the runtime instanceof-Error behavior of thrown instances is
+            // verified by the shared mTLS contract scenarios.
+            'const transportError: NodeMtlsTransportError = new NodeMtlsTransportError("TIMEOUT", "fixture");\n' +
+            "void transport; void transportError;\n\n" +
             "// @ts-expect-error required certificate options are missing\n" +
             "createNodeMtlsTransport({});\n" +
             "// @ts-expect-error timeoutMs must be a number\n" +
@@ -325,10 +304,8 @@ try {
             "  fetch: (input, init) => transport.request(String(input), init ?? {}),\n" +
             "  timeoutMs: 0\n" +
             "});\n" +
-            "if (!(TossMtlsHttpClientError instanceof Error)) {\n" +
-            '  throw new Error("TossMtlsHttpClientError must extend Error");\n' +
-            "}\n" +
-            "void client;\n\n" +
+            "const clientError: TossMtlsHttpClientError = new TossMtlsHttpClientError(502, { ok: false });\n" +
+            "void client; void clientError;\n\n" +
             "async function consumeIapStatus(orderId: string): Promise<string> {\n" +
             "  const response: IapOrderStatusResponse = await client.iapOrderStatus({ orderId });\n" +
             "  if (response.ok === false) {\n" +
@@ -787,81 +764,6 @@ ${platform.consumerBody}
   }
 }
 
-
-/**
- * Boots the repo's Node mTLS test server (real client-certificate
- * enforcement) with fresh openssl materials for tarball consumer checks.
- * The server is test infrastructure running from the repository; only the
- * CLIENT side runs from the installed tarball.
- */
-async function startTarballMtlsServer() {
-  const { execFileSync, spawn } = await import("node:child_process");
-  const { mkdtempSync, readFileSync, rmSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const dir = mkdtempSync(join(tmpdir(), "ait-kit-tarball-mtls-"));
-  const run = (args) => execFileSync("openssl", args, { cwd: dir });
-  run(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-days", "1", "-subj", "/CN=ait-kit-tarball-ca"]);
-  run(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key", "-out", "server.csr", "-subj", "/CN=localhost"]);
-  execFileSync(
-    "openssl",
-    ["x509", "-req", "-in", "server.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "server.crt", "-days", "1", "-extfile", "-"],
-    { cwd: dir, input: "subjectAltName=DNS:localhost,IP:127.0.0.1\n" }
-  );
-  run(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "client.key", "-out", "client.csr", "-subj", "/CN=ait-kit-tarball-client"]);
-  run(["x509", "-req", "-in", "client.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "client.crt", "-days", "1"]);
-
-  const child = spawn(
-    "node",
-    [join(rootDir, "packages/api-client/test/helpers/mtls-test-server.mjs"), dir, "0"],
-    { stdio: ["ignore", "pipe", "inherit"] }
-  );
-  // Startup-failure cleanup must kill the orphaned child and remove the
-  // generated key material; once readiness settles it must not fire again.
-  let settled = false;
-  const port = await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      rmSync(dir, { recursive: true, force: true });
-      reject(new Error("tarball mTLS server did not start"));
-    }, 10_000);
-    child.stdout.on("data", (chunk) => {
-      const match = /ready:(\d+)/.exec(chunk.toString());
-      if (match) {
-        clearTimeout(timeout);
-        resolve(Number(match[1]));
-      }
-    });
-    child.on("exit", (code) => {
-      clearTimeout(timeout);
-      if (!settled) {
-        rmSync(dir, { recursive: true, force: true });
-        reject(new Error(`tarball mTLS server exited early: ${code}`));
-      }
-    });
-  }).finally(() => {
-    settled = true;
-  });
-  return {
-    baseUrl: `https://localhost:${port}`,
-    ca: readFileSync(join(dir, "ca.crt"), "utf8"),
-    clientCert: readFileSync(join(dir, "client.crt"), "utf8"),
-    clientKey: readFileSync(join(dir, "client.key"), "utf8"),
-    close: async () => {
-      child.kill("SIGTERM");
-      await new Promise((resolve) => {
-        const forceKill = setTimeout(() => {
-          child.kill("SIGKILL");
-          resolve();
-        }, 2_000);
-        child.on("exit", () => {
-          clearTimeout(forceKill);
-          resolve();
-        });
-      });
-      rmSync(dir, { recursive: true, force: true });
-    }
-  };
-}
 
 function runTsc(cwd, file, moduleResolution, options = {}) {
   const moduleKind = moduleResolution === "bundler" ? "esnext" : moduleResolution;
