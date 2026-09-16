@@ -296,17 +296,17 @@ export async function verifyPublishedNodeTransport({
       throw new VerificationError("contract", `consumer exceeded its ${CHILD_TIMEOUT_MS / 1000}s budget (watchdog kill)`);
     }
     if (child.status !== 0) {
-      // The consumer prints its JSON payload before exiting non-zero; a
-      // wrong-target resolution is a VERIFY failure, not a contract one.
+      // The consumer prints its JSON payload before exiting non-zero. Keep
+      // its scenario results and resolution details in the report — they
+      // are exactly the diagnostics a failing run needs — then classify:
+      // a wrong-target resolution is a VERIFY failure, a failing scenario
+      // is a CONTRACT failure.
       const payload = parseConsumerPayload(child.stdout);
-      if (payload && payload.insideInstallRoot === false) {
-        report.moduleResolution = {
-          requestedSpecifier: ENTRYPOINT,
-          resolvedUrl: payload.resolvedUrl,
-          resolvedPath: payload.resolvedPath,
-          insideInstallRoot: false
-        };
-        throw new VerificationError("verify", `resolved module is not inside the installed package: ${payload.resolvedPath}`);
+      if (payload) {
+        applyPayloadToReport(report, payload);
+        if (payload.insideInstallRoot === false) {
+          throw new VerificationError("verify", `resolved module is not inside the installed package: ${payload.resolvedPath}`);
+        }
       }
       throw new VerificationError("contract", `consumer exited with ${child.status ?? `signal ${child.signal}`}`);
     }
@@ -314,13 +314,7 @@ export async function verifyPublishedNodeTransport({
     // Parse the consumer's JSON result — success is decided from the actual
     // scenario outcomes and module resolution, never from message text.
     const payload = parseConsumerPayload(child.stdout);
-    report.moduleResolution = {
-      requestedSpecifier: ENTRYPOINT,
-      resolvedUrl: payload.resolvedUrl,
-      resolvedPath: payload.resolvedPath,
-      insideInstallRoot: payload.insideInstallRoot
-    };
-    report.scenarios = payload.result?.scenarios ?? null;
+    applyPayloadToReport(report, payload);
     // Belt and braces: the parent re-checks the resolution claim.
     if (!payload.insideInstallRoot || !isInsideDirectory(payload.resolvedPath, realpathSync(clientDir))) {
       throw new VerificationError("verify", `resolved module is not inside the installed package: ${payload.resolvedPath}`);
@@ -344,14 +338,25 @@ export async function verifyPublishedNodeTransport({
   } finally {
     // Every helper, timer, and temporary directory is torn down on BOTH
     // success and failure; the report (when requested) survives below.
+    // A cleanup failure must never mask an existing verification error,
+    // but on an otherwise-successful run it FAILS the verification: a
+    // leftover server process or key directory must not ride a pass.
+    let serverCleanupFailure;
     try {
       await mtls?.close();
-    } catch {
-      // close() already force-kills after its graceful window; a second
-      // failure must not mask the original verification error.
+    } catch (error) {
+      serverCleanupFailure = error;
     }
     if (projectDir) {
       rmSync(projectDir, { recursive: true, force: true });
+    }
+    if (serverCleanupFailure && !report.failurePhase) {
+      report.failurePhase = "internal";
+      report.failureMessage = `mTLS verification server cleanup failed: ${
+        serverCleanupFailure instanceof Error ? serverCleanupFailure.message : String(serverCleanupFailure)
+      }`;
+      serverCleanupFailure.report = report;
+      throw serverCleanupFailure;
     }
   }
 }
@@ -364,9 +369,32 @@ function parseConsumerPayload(stdout) {
   }
 }
 
+function applyPayloadToReport(report, payload) {
+  if (!payload) return;
+  report.moduleResolution = {
+    requestedSpecifier: ENTRYPOINT,
+    resolvedUrl: payload.resolvedUrl,
+    resolvedPath: payload.resolvedPath,
+    insideInstallRoot: payload.insideInstallRoot
+  };
+  report.scenarios = payload.result?.scenarios ?? null;
+}
+
 function currentCommit() {
-  const result = spawnSync("git", ["rev-parse", "--short", "HEAD"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
-  return result.status === 0 ? result.stdout.trim() : "unknown";
+  const cwd = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const hash = spawnSync("git", ["rev-parse", "--short", "HEAD"], { cwd, encoding: "utf8" });
+  if (hash.status !== 0) return "unknown";
+  // A dirty verification tool would be misattributed to a clean HEAD, so
+  // surface working-tree modifications of the tooling in the marker.
+  const dirty = spawnSync(
+    "git",
+    ["status", "--porcelain", "--", "scripts/", "packages/api-client/test/helpers/mtls-contract-check.mjs"],
+    { cwd, encoding: "utf8" }
+  );
+  if (dirty.status === 0 && dirty.stdout.trim() !== "") {
+    return `${hash.stdout.trim()}-dirty`;
+  }
+  return hash.stdout.trim();
 }
 
 function positiveIntEnv(name, fallback) {
