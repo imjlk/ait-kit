@@ -25,7 +25,7 @@ import {
   NodeMtlsTransportError,
   type NodeMtlsTransportErrorCode,
   type NodeMtlsTransportOptions
-} from "./mtls-transport";
+} from "./mtls-transport.js";
 
 export { createNodeMtlsTransport, NodeMtlsTransportError };
 export type { NodeMtlsTransportOptions, NodeMtlsTransportErrorCode };

@@ -49,6 +49,15 @@ const server = createServer(
       return;
     }
 
+    if (url.pathname === "/status") {
+      // Raw status line control: statuses outside the Fetch Response range
+      // (e.g. 600) must surface as typed conversion failures on the client.
+      const status = Number(url.searchParams.get("code") ?? 200);
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify({ status }));
+      return;
+    }
+
     if (url.pathname === "/no-content") {
       res.writeHead(204);
       res.end();

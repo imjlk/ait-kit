@@ -55,9 +55,16 @@ response bodies are buffered up to `maxResponseBytes` and responses that
 break, exceed the limit, or never complete reject with a typed
 `NodeMtlsTransportError` (`code`: `TIMEOUT`, `ABORTED`, `RESPONSE_TOO_LARGE`,
 `REQUEST_FAILED`, `INVALID_URL`, `UNSUPPORTED_BODY`, `ALREADY_ABORTED`).
+`REQUEST_FAILED` also covers failures to convert a fully received response
+into a fetch `Response` — for example a raw status outside the Fetch status
+range (600), which the `Response` constructor rejects: the request rejects
+with the original conversion exception preserved as `cause`, valid 4xx/5xx
+responses still resolve as HTTP responses, and an already-settled timeout or
+abort outcome is never overwritten by a late conversion error.
 
-Supported runtimes for `/node`: verified with Node.js 26 and Bun 1.4.0 (the
-versions this repository's tests and tarball smoke checks run against).
+Supported runtimes for `/node`: verified with Bun 1.4.0 (test suite) and
+Node.js 26.4.0 (test-suite child processes plus tarball consumer checks);
+CI pins Bun 1.4.2 and Node.js 24 for the same checks.
 
 See the [AIT Kit repository](https://github.com/imjlk/ait-kit) for proxy configuration and API
 examples.
