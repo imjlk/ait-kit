@@ -158,21 +158,28 @@ function rewardFailure(
 }
 
 /**
- * Prepare: issues a promotion transaction key (get-key) and nothing else.
- * The official endpoint takes no body and no recipient header. Consumers are
- * expected to persist the returned key before executing; see the promotion
- * section of the README for the recommended storage fields.
+ * Prepare: issues a promotion transaction key (get-key) and nothing else —
+ * no execute, no result lookup. The request carries no body; the recipient
+ * travels as the single identity header matching the one recipient the
+ * caller supplied (a transaction key is bound to the recipient it was
+ * issued for, so a recipient-less call is rejected before dispatch).
+ * Prepare success means KEY ISSUANCE succeeded, not that a grant happened.
+ * Consumers must persist the returned key before executing; see the
+ * promotion section of the README for the recommended storage fields.
  */
 export async function preparePromotionReward(
-  _body: PromotionRewardPrepareInput,
+  body: PromotionRewardPrepareInput,
   options: NormalizedAppsInTossCoreOptions
 ): Promise<PromotionRewardPrepareResponse> {
+  const request = objectOrSelf(body, {});
+  const recipient = normalizeMessageRecipient(request, "INVALID_PROMOTION_RECIPIENT", "promotion recipient");
+
   if (options.mode !== "forward") {
     return { ok: true, providerTransactionKey: "stub-promotion-transaction-key", stub: true };
   }
   const keyResponse = await requestToss(
     // The official get-key contract takes no request body.
-    { method: "POST", path: TOSS_ENDPOINTS.promotionGetKey },
+    { method: "POST", path: TOSS_ENDPOINTS.promotionGetKey, headers: recipientIdentifierHeaders(recipient) },
     options
   );
   if (!httpStatusOk(keyResponse.status) || isUpstreamFailure(keyResponse.body)) {
