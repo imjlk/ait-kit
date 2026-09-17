@@ -92,7 +92,7 @@ export interface TossMtlsHttpClient {
   iapOrderStatus(body: IapOrderStatusInput): Promise<IapOrderStatusResponse>;
   anonKeyVerify(body: AnonKeyVerifyInput): Promise<AnonKeyVerifyResponse>;
   promotionRewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
-  promotionPrepareReward(body?: PromotionRewardPrepareInput): Promise<PromotionRewardPrepareResponse>;
+  promotionPrepareReward(body: PromotionRewardPrepareInput): Promise<PromotionRewardPrepareResponse>;
   promotionExecuteReward(body: PromotionRewardExecuteInput): Promise<PromotionRewardExecuteResponse>;
   promotionRewardStatus(body: PromotionRewardStatusInput): Promise<PromotionRewardStatusResponse>;
   smartMessageSend(body: SmartMessageSendInput): Promise<SmartMessageResponse>;
@@ -184,7 +184,7 @@ export function createTossMtlsHttpClient(options: TossMtlsHttpClientOptions): To
     iapOrderStatus: (body) => request("POST", PROXY_ENDPOINTS.iapOrderStatus, body),
     anonKeyVerify: (body) => request("POST", PROXY_ENDPOINTS.anonKeyVerify, body),
     promotionRewardGrant: (body) => request("POST", PROXY_ENDPOINTS.promotionRewardGrant, body),
-    promotionPrepareReward: () => request("POST", PROXY_ENDPOINTS.promotionPrepareReward, {}),
+    promotionPrepareReward: (body) => request("POST", PROXY_ENDPOINTS.promotionPrepareReward, body),
     promotionExecuteReward: (body) => request("POST", PROXY_ENDPOINTS.promotionExecuteReward, body),
     promotionRewardStatus: (body) => request("POST", PROXY_ENDPOINTS.promotionRewardStatus, body),
     smartMessageSend: (body) => request("POST", PROXY_ENDPOINTS.smartMessageSend, body),

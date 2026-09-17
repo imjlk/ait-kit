@@ -234,10 +234,20 @@ export interface PromotionRewardGrantInput {
 }
 
 /**
- * Input for the explicit promotion prepare step. The official get-key
- * endpoint takes no body and no recipient header (mTLS identifies the app).
+ * Input for the explicit promotion prepare (get-key) step.
+ *
+ * The recipient fields follow the shared recipient contract: exactly one of
+ * `userKey`, `tossUserKey`, or `anonKey`. The chosen recipient is sent as
+ * the single matching identity header on the get-key request; the official
+ * endpoint takes no request body. A transaction key is bound to the
+ * recipient it was issued for, so a call without exactly one recipient is
+ * rejected before anything is dispatched.
  */
-export interface PromotionRewardPrepareInput {}
+export interface PromotionRewardPrepareInput {
+  userKey?: string | number;
+  tossUserKey?: string | number;
+  anonKey?: string;
+}
 
 /**
  * Input for the explicit promotion execute step. `providerTransactionKey`

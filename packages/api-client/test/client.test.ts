@@ -98,7 +98,7 @@ describe("@ait-kit/api-client", () => {
     await client.iapOrderStatus({});
     await client.anonKeyVerify({ anonKey: "anon-hash" });
     await client.promotionRewardGrant({});
-    await client.promotionPrepareReward();
+    await client.promotionPrepareReward({ tossUserKey: "user-1" });
     await client.promotionExecuteReward({});
     await client.promotionRewardStatus({});
     await client.smartMessageBulkSend({ templateSetCode: "template", contextList: [] });
@@ -116,6 +116,10 @@ describe("@ait-kit/api-client", () => {
       PROXY_ENDPOINTS.smartMessageBulkSend
     ]);
     expect(PROXY_ENDPOINTS.genericMtlRequest).toBe(PROXY_ENDPOINTS.genericMtlsRequest);
+    // The prepare recipient must survive the proxy hop: the body the proxy
+    // service forwards to api-core is exactly what the caller supplied.
+    const prepareCall = calls.find((call) => call.url.endsWith(PROXY_ENDPOINTS.promotionPrepareReward));
+    expect(JSON.parse(String(prepareCall?.body))).toEqual({ tossUserKey: "user-1" });
   });
 
   test("throws on non-2xx proxy responses with parsed status and body", async () => {

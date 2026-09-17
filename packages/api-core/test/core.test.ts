@@ -1099,17 +1099,109 @@ describe("@ait-kit/api-core", () => {
       };
     }
 
-    test("prepare only issues a transaction key", async () => {
-      const { api, paths, bodies } = recordingApi(async () =>
+    test("prepare only issues a transaction key for the given user recipient", async () => {
+      const { api, paths, headers, bodies } = recordingApi(async () =>
         Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
       );
 
-      const response = await api.promotionPrepareReward({});
+      const response = await api.promotionPrepareReward({ tossUserKey: "user-1" });
 
       expect(response).toEqual({ ok: true, providerTransactionKey: "transaction-key" });
       expect(paths).toEqual([TOSS_ENDPOINTS.promotionGetKey]);
       // The official get-key contract takes no request body.
       expect(bodies[0]).toBeUndefined();
+      expect(headers[0].get("x-toss-user-key")).toBe("user-1");
+      expect(headers[0].get("x-anon-key")).toBeNull();
+    });
+
+    test("prepare sends the anonymous identity header for an anonymous recipient", async () => {
+      const { api, paths, headers } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "anon-transaction-key" } })
+      );
+
+      const response = await api.promotionPrepareReward({ anonKey: "ait:anon-1" });
+
+      expect(response).toEqual({ ok: true, providerTransactionKey: "anon-transaction-key" });
+      expect(paths).toEqual([TOSS_ENDPOINTS.promotionGetKey]);
+      // The anonymous key passes through byte-for-byte — no prefix is
+      // added or stripped.
+      expect(headers[0].get("x-anon-key")).toBe("ait:anon-1");
+      expect(headers[0].get("x-toss-user-key")).toBeNull();
+    });
+
+    test("prepare accepts the userKey alias as the user identity", async () => {
+      const { api, headers } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+
+      await api.promotionPrepareReward({ userKey: 12345 });
+
+      expect(headers[0].get("x-toss-user-key")).toBe("12345");
+      expect(headers[0].get("x-anon-key")).toBeNull();
+    });
+
+    test.each([
+      ["no recipient", {}],
+      ["a duplicated recipient", { tossUserKey: "user-1", anonKey: "ait:anon-1" }],
+      ["an invalid recipient value", { tossUserKey: "   " }]
+    ] as const)("prepare rejects %s before any upstream request", async (_label, input) => {
+      const { api, paths } = recordingApi(async () => {
+        throw new Error("invalid prepare input must not reach the transport");
+      });
+
+      await expect(api.promotionPrepareReward(input as never)).rejects.toMatchObject({
+        code: "INVALID_PROMOTION_RECIPIENT",
+        status: 400
+      });
+      expect(paths).toEqual([]);
+    });
+
+    test("prepare never dispatches execute or result lookups", async () => {
+      const { api, paths } = recordingApi(async () =>
+        Response.json({ resultType: "SUCCESS", success: { key: "transaction-key" } })
+      );
+
+      await api.promotionPrepareReward({ tossUserKey: "user-1" });
+
+      expect(paths).toEqual([TOSS_ENDPOINTS.promotionGetKey]);
+    });
+
+    test("parallel prepares keep their recipient headers isolated", async () => {
+      const seen: Array<[string | null, string | null]> = [];
+      const trackingApi = createAppsInTossApiRpc(
+        createAppsInTossApi({
+          mode: "forward",
+          upstreamBaseUrl: "https://partner.example",
+          mtlsClient: {
+            async request(_url, init) {
+              const header = new Headers(init.headers);
+              seen.push([header.get("x-toss-user-key"), header.get("x-anon-key")]);
+              // Each call gets its own key so a shared-key fixture cannot
+              // weaken the isolation assertions below.
+              return Response.json({ resultType: "SUCCESS", success: { key: `key-${seen.length}` } });
+            }
+          }
+        })
+      );
+
+      const [user, anon, aliased] = await Promise.all([
+        trackingApi.promotionPrepareReward({ tossUserKey: "user-A" }),
+        trackingApi.promotionPrepareReward({ anonKey: "ait:anon-B" }),
+        trackingApi.promotionPrepareReward({ userKey: "user-C" })
+      ]);
+
+      expect(user.ok && anon.ok && aliased.ok).toBe(true);
+      if (!user.ok || !anon.ok || !aliased.ok) {
+        throw new Error(`parallel prepares failed: ${JSON.stringify([user, anon, aliased])}`);
+      }
+      expect(user.providerTransactionKey).toBe("key-1");
+      expect(anon.providerTransactionKey).toBe("key-2");
+      expect(aliased.providerTransactionKey).toBe("key-3");
+      expect(seen).toEqual([
+        ["user-A", null],
+        [null, "ait:anon-B"],
+        ["user-C", null]
+      ]);
     });
 
     test.each([
@@ -1121,7 +1213,7 @@ describe("@ait-kit/api-core", () => {
       async (_label, body, reasonFragment) => {
         const { api } = recordingApi(async () => Response.json(body));
 
-        const response = await api.promotionPrepareReward({});
+        const response = await api.promotionPrepareReward({ tossUserKey: "user-1" });
 
         expect(response).toMatchObject({
           ok: false,
@@ -1130,6 +1222,22 @@ describe("@ait-kit/api-core", () => {
         });
       }
     );
+
+    test("prepare reports a failed get-key envelope without inventing a key", async () => {
+      const { api } = recordingApi(async () =>
+        Response.json({ resultType: "FAIL", error: { errorCode: "4095", reason: "too many requests" } })
+      );
+
+      const response = await api.promotionPrepareReward({ tossUserKey: "user-1" });
+
+      expect(response).toMatchObject({
+        ok: false,
+        providerStatus: "ERROR",
+        failureReason: expect.stringContaining("too many requests"),
+        providerErrorCode: "4095"
+      });
+      expect(response).not.toHaveProperty("providerTransactionKey");
+    });
 
     test.each([-1, 1.5, Infinity] as const)(
       "rejects the configured tossPromotionAmount %s",
@@ -1713,10 +1821,22 @@ describe("@ait-kit/api-core", () => {
       ).rejects.toMatchObject({ code: "MISSING_PROMOTION_CODE", status: 400 });
     });
 
+    test("stub mode still requires exactly one recipient for prepare", async () => {
+      const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub" }));
+
+      await expect(api.promotionPrepareReward({} as never)).rejects.toMatchObject({
+        code: "INVALID_PROMOTION_RECIPIENT",
+        status: 400
+      });
+      await expect(
+        api.promotionPrepareReward({ tossUserKey: "user", anonKey: "ait:anon" } as never)
+      ).rejects.toMatchObject({ code: "INVALID_PROMOTION_RECIPIENT", status: 400 });
+    });
+
     test("stub mode never claims a granted promotion", async () => {
       const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub", now: () => 123_456 }));
 
-      await expect(api.promotionPrepareReward({})).resolves.toEqual({
+      await expect(api.promotionPrepareReward({ tossUserKey: "user" })).resolves.toEqual({
         ok: true,
         providerTransactionKey: "stub-promotion-transaction-key",
         stub: true

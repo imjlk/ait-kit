@@ -140,31 +140,38 @@ lookup in one call. The explicit three-step flow decouples them so your
 database sits between the phases:
 
 ```ts
-// 1. Issue a transaction key.
-const prepared = await tossApi.promotionPrepareReward({});
+// The recipient identity the grant is for — exactly one of userKey /
+// tossUserKey / anonKey, the same value you will execute with. Strip your
+// own storage prefix first; the kit transmits identifiers byte-for-byte.
+const recipientKey = "anon:stored-hash"; // your app-prefixed storage form
+const recipientAnonKey = recipientKey.replace(/^anon:/, "");
+
+// 1. Issue a transaction key for that recipient. Prepare carries the
+//    recipient as the single identity header and sends no request body;
+//    a call with a missing, duplicated, or malformed recipient is rejected
+//    before anything is dispatched.
+const prepared = await tossApi.promotionPrepareReward({ anonKey: recipientAnonKey });
 if (!prepared.ok) throw new Error(prepared.failureReason);
 
 // 2. Persist the key BEFORE executing. Bind it to the owner, the recipient
-//    identifier you will execute with, the promotion code, the amount, and
+//    identifier you prepared with, the promotion code, the amount, and
 //    your own request id — see the storage guidance below.
-const recipientKey = "anon:stored-hash"; // your app-prefixed storage form
 await db.promotionGrants.insert({
   providerTransactionKey: prepared.providerTransactionKey,
   ownerId: session.userId,          // who initiated the grant
-  recipientKey,                     // exactly what you will send
+  recipientKey,                     // exactly what you prepared with
   promotionCode: "WELCOME_EVENT",
   amount: 1000,
   requestId: request.id,            // your idempotency/tracing id
   stage: "PREPARED"
 });
 
-// 3. Execute the grant with the stored key. Strip your own storage prefix
-//    first — the kit transmits identifiers byte-for-byte.
+// 3. Execute the grant with the stored key and the SAME recipient.
 const executed = await tossApi.promotionExecuteReward({
   providerTransactionKey: prepared.providerTransactionKey,
   promotionCode: "WELCOME_EVENT",
   amount: 1000,
-  anonKey: recipientKey.replace(/^anon:/, "") // or userKey / tossUserKey
+  anonKey: recipientAnonKey // or userKey / tossUserKey
 });
 
 // 4. Confirm the outcome. If step 3 crashed or returned UNKNOWN, re-run
@@ -172,7 +179,7 @@ const executed = await tossApi.promotionExecuteReward({
 const status = await tossApi.promotionRewardStatus({
   providerTransactionKey: prepared.providerTransactionKey,
   promotionCode: "WELCOME_EVENT",
-  anonKey: recipientKey.replace(/^anon:/, "")
+  anonKey: recipientAnonKey
 });
 // status.status: "GRANTED" | "PENDING" | "FAILED" | "NOT_FOUND" | "UNKNOWN"
 ```
