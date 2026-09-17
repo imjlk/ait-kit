@@ -102,6 +102,33 @@ describe("Cloudflare HTTP fallback", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, valid: true });
   });
+
+  test("forwards the prepare recipient unchanged over the authenticated route", async () => {
+    const headers = new Headers({ "content-type": "application/json" });
+    headers.set("authorization", "Bearer expected-token");
+    let forwarded: unknown;
+    const response = await handleFetchFallback(
+      new Request("https://service.example/internal/apps-in-toss/promotion/reward/prepare", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ tossUserKey: "user-1" })
+      }),
+      {
+        ...fakeRpc(),
+        async promotionPrepareReward(body) {
+          forwarded = body;
+          return { ok: true, providerTransactionKey: "transaction-key" };
+        }
+      },
+      { bearerToken: "expected-token" }
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, providerTransactionKey: "transaction-key" });
+    // The HTTP hop must preserve the recipient exactly — api-core's
+    // exactly-one-recipient validation happens downstream of this pass-through.
+    expect(forwarded).toEqual({ tossUserKey: "user-1" });
+  });
 });
 
 function promotionRequest(providedToken?: string, expectedToken?: string) {
