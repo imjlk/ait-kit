@@ -185,6 +185,15 @@ register("./cloudflare-worker-resolver.mjs", import.meta.url);
     }
     run(process.execPath, importArgs, installDir);
 
+    if (packedPackage.name === "@ait-kit/api-core") {
+      const contractPath = join(installDir, "recipient-contract.mjs");
+      writeFileSync(contractPath,
+        'import { createTossMtlsCore } from "@ait-kit/api-core";\n' +
+        'import { checkRecipientContract } from ' + JSON.stringify(repoFileUrl("packages/api-core/test/helpers/recipient-contract.mjs")) + ';\n' +
+        'await checkRecipientContract(createTossMtlsCore);\n');
+      run(process.execPath, [contractPath], installDir);
+    }
+
     if (packedPackage.hasNodeExport) {
       // Prove the installed /node entry runs a real request through Node's
       // https stack in the isolated consumer. Port 9 (discard) is closed, so

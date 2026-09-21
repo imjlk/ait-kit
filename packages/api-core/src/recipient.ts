@@ -71,7 +71,7 @@ export function normalizeMessageRecipient(
     throw invalidRecipientValue(
       errorCode,
       errorContext,
-      `${field} must be a non-empty string or finite number`
+      `${field} must be a non-empty string or safe integer`
     );
   }
   return { kind: "user", userKey: userValue };
@@ -94,7 +94,7 @@ export function recipientIdentifierHeaders(recipient: MessageRecipient): Record<
 
 function recipientUserValue(value: unknown): string | number | undefined {
   if (typeof value === "number") {
-    return Number.isFinite(value) ? value : undefined;
+    return Number.isSafeInteger(value) ? value : undefined;
   }
   if (typeof value === "string") {
     return value.trim() ? value : undefined;
@@ -108,4 +108,16 @@ function recipientAnonValue(value: unknown): string | undefined {
 
 function isPresent(value: unknown) {
   return value !== undefined && value !== null;
+}
+
+/** Scrub only provider/transport prose; never rewrite codes or correlation keys. */
+export function redactRecipientFailureReason(reason: string, recipient: MessageRecipient): string {
+  const value = String(recipient.kind === "user" ? recipient.userKey : recipient.anonKey);
+  // Some transports/providers trim header whitespace. Suppress the entire
+  // message, including for one-character IDs, instead of rewriting fragments.
+  // Malformed resultType evidence is uppercased by the promotion parser
+  // before being included in failure prose; cover that spelling too.
+  const identifiers = [value, value.trim()].filter(Boolean)
+    .flatMap((identifier) => [identifier, identifier.toUpperCase()]);
+  return identifiers.some((identifier) => reason.includes(identifier)) ? "[redacted]" : reason;
 }
