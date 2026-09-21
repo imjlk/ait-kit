@@ -30,6 +30,15 @@ export async function checkRecipientContract(createCore) {
     assert.equal(result.result ?? result.status,'UNKNOWN');
     assert.equal(result.providerTransactionKey,'tx-1');
   }
+  for (const method of ['promotionExecuteReward', 'promotionRewardStatus']) {
+    const core = createCore({mode:'forward',upstreamBaseUrl:'https://fixture.invalid',mtlsClient:{
+      async request() { return Response.json({ resultType: 'user-a' }); }
+    }});
+    const result = await core[method]({...base,userKey:'user-a'});
+    assert.equal(result.failureReason,'[redacted]');
+    assert.equal(result.result ?? result.status,'UNKNOWN');
+    assert.equal(result.providerTransactionKey,'tx-1');
+  }
   for (const mode of ['stub','forward']) {
     for (const field of ['userKey','tossUserKey']) {
       for (const value of [1.5, Number.MAX_SAFE_INTEGER + 1, Number.MIN_SAFE_INTEGER - 1, NaN, Infinity]) {

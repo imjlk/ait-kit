@@ -115,6 +115,9 @@ export function redactRecipientFailureReason(reason: string, recipient: MessageR
   const value = String(recipient.kind === "user" ? recipient.userKey : recipient.anonKey);
   // Some transports/providers trim header whitespace. Suppress the entire
   // message, including for one-character IDs, instead of rewriting fragments.
-  const identifiers = [value, value.trim()].filter(Boolean);
+  // Malformed resultType evidence is uppercased by the promotion parser
+  // before being included in failure prose; cover that spelling too.
+  const identifiers = [value, value.trim()].filter(Boolean)
+    .flatMap((identifier) => [identifier, identifier.toUpperCase()]);
   return identifiers.some((identifier) => reason.includes(identifier)) ? "[redacted]" : reason;
 }
