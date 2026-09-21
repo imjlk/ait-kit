@@ -1,5 +1,11 @@
 # @ait-kit/api-orpc
 
+## 0.5.1 — 2026-09-21
+
+### Patch changes
+
+- Updated dependencies: api-core@0.5.1
+
 ## 0.5.0 — 2026-09-17
 
 ### Patch changes
