@@ -1,5 +1,11 @@
 # @ait-kit/api-core
 
+## 0.5.1 — 2026-09-21
+
+### Security
+
+- [9e2e068](https://github.com/imjlk/ait-kit/commit/9e2e068175edb802fd198855c860be16bb2c53bc) Suppress recipient-bearing provider and transport failure text returned by promotion prepare, execute and status, including short identifiers, while preserving transaction keys, provider codes and outcome semantics. Shared recipient validation now rejects fractional and unsafe numeric userKey/tossUserKey values before transport in promotion and single/bulk messages. Pass large numeric identifiers as exact strings; never convert them through JavaScript Number first. — Thanks @imjlk!
+
 ## 0.5.0 — 2026-09-17
 
 ### Minor changes
