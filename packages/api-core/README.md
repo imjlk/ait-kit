@@ -228,3 +228,16 @@ only — passing an existing key never triggers an execute through that API.
 
 See the [AIT Kit repository](https://github.com/imjlk/ait-kit) for supported APIs, Cloudflare
 bindings, examples, and release notes.
+
+### Recipient privacy and numeric IDs
+
+Promotion prepare/execute/status suppress `failureReason` text when it contains
+the submitted recipient (including short IDs and trimmed header spellings).
+Provider error codes, transaction keys and outcome semantics are preserved.
+This protects returned failure text; raw transport logs and the generic mTLS
+relay remain the caller's responsibility.
+
+Numeric `userKey` and `tossUserKey` must be safe integers. Fractional and unsafe
+numbers are rejected before dispatch, including in single/bulk Smart Message
+requests. Use an exact string for large IDs; converting an already-rounded Number
+to a string cannot recover the original identifier.

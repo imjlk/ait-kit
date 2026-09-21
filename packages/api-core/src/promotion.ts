@@ -1,5 +1,5 @@
 import { requestToss, resolveMtlsClient, resolveMtlsUrl } from "./mtls-client.js";
-import { normalizeMessageRecipient, recipientIdentifierHeaders } from "./recipient.js";
+import { normalizeMessageRecipient, recipientIdentifierHeaders, redactRecipientFailureReason } from "./recipient.js";
 import {
   AppsInTossApiError,
   clientError,
@@ -186,7 +186,7 @@ export async function preparePromotionReward(
     return {
       ok: false,
       providerStatus: "ERROR",
-      failureReason: upstreamFailureReason(keyResponse.body),
+      failureReason: redactRecipientFailureReason(upstreamFailureReason(keyResponse.body), recipient),
       providerErrorCode: upstreamFailureCode(keyResponse.body),
       upstreamStatus: keyResponse.status
     };
@@ -260,7 +260,7 @@ export async function executePromotionReward(
       ok: true,
       result: "UNKNOWN",
       providerTransactionKey,
-      failureReason: `promotion execute request failed: ${message}`
+      failureReason: redactRecipientFailureReason(`promotion execute request failed: ${message}`, recipient)
     };
   }
 
@@ -283,7 +283,7 @@ export async function executePromotionReward(
         ok: false,
         providerTransactionKey,
         providerStatus: "FAILED",
-        failureReason: upstreamFailureReason(executeResponse.body),
+        failureReason: redactRecipientFailureReason(upstreamFailureReason(executeResponse.body), recipient),
         providerErrorCode,
         upstreamStatus: executeResponse.status
       };
@@ -292,7 +292,7 @@ export async function executePromotionReward(
       ok: true,
       result: "UNKNOWN",
       providerTransactionKey,
-      failureReason: upstreamFailureReason(executeResponse.body),
+      failureReason: redactRecipientFailureReason(upstreamFailureReason(executeResponse.body), recipient),
       upstreamStatus: executeResponse.status
     };
   }
@@ -303,7 +303,7 @@ export async function executePromotionReward(
       ok: true,
       result: "UNKNOWN",
       providerTransactionKey,
-      failureReason: `unexpected promotion execute envelope: ${executeResultType}`,
+      failureReason: redactRecipientFailureReason(`unexpected promotion execute envelope: ${executeResultType}`, recipient),
       upstreamStatus: executeResponse.status
     };
   }
@@ -368,7 +368,7 @@ export async function statusPromotionReward(
     if (error instanceof AppsInTossApiError) throw error;
     const message = error instanceof Error ? error.message : String(error);
     return unknownStatus(providerTransactionKey, options, {
-      failureReason: `promotion status request failed: ${message}`
+      failureReason: redactRecipientFailureReason(`promotion status request failed: ${message}`, recipient)
     });
   }
 
@@ -389,12 +389,12 @@ export async function statusPromotionReward(
         providerTransactionKey,
         checkedAt: options.now(),
         providerErrorCode,
-        failureReason: upstreamFailureReason(resultResponse.body),
+        failureReason: redactRecipientFailureReason(upstreamFailureReason(resultResponse.body), recipient),
         upstreamStatus: resultResponse.status
       };
     }
     return unknownStatus(providerTransactionKey, options, {
-      failureReason: upstreamFailureReason(resultResponse.body),
+      failureReason: redactRecipientFailureReason(upstreamFailureReason(resultResponse.body), recipient),
       providerErrorCode,
       upstreamStatus: resultResponse.status
     });
@@ -405,9 +405,9 @@ export async function statusPromotionReward(
   const resultType = strictResultType(resultResponse.body);
   if (resultType !== "SUCCESS") {
     return unknownStatus(providerTransactionKey, options, {
-      failureReason: resultType
+      failureReason: redactRecipientFailureReason(resultType
         ? `unexpected promotion result envelope: ${resultType}`
-        : "promotion status response was not a SUCCESS envelope",
+        : "promotion status response was not a SUCCESS envelope", recipient),
       upstreamStatus: resultResponse.status
     });
   }
@@ -423,7 +423,7 @@ export async function statusPromotionReward(
       status,
       providerTransactionKey,
       checkedAt,
-      failureReason: upstreamFailureReason(resultResponse.body)
+      failureReason: redactRecipientFailureReason(upstreamFailureReason(resultResponse.body), recipient)
     };
   }
   return unknownStatus(providerTransactionKey, options, {
