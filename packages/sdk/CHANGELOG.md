@@ -1,5 +1,15 @@
 # @ait-kit/sdk
 
+## 0.5.0 — 2026-09-22
+
+### Minor changes
+
+- [a0da660](https://github.com/imjlk/ait-kit/commit/a0da6603529ada44132c542f182f05d480732f02) Add WebView full-screen and rewarded ads with shared load coalescing, single-use display, deadlines, and listener cleanup. — Thanks @imjlk!
+- [b1a0547](https://github.com/imjlk/ait-kit/commit/b1a05479404f296ac3515c74994ab997e20a7272) Add read-only IAP subscription status queries for React Native and WebView, preserving provider access flags and future status values. — Thanks @imjlk!
+- [6aef9cd](https://github.com/imjlk/ait-kit/commit/6aef9cd60057833a87c82092cd3fc4c4d04fb34f) Add the explicit WebView entry point and factory/type names while preserving deprecated Web aliases. — Thanks @imjlk!
+- [8cc2bdf](https://github.com/imjlk/ait-kit/commit/8cc2bdf5419c0410bbe0c6f69106bbed2dcddcd7) Add WebView banner initialization, exclusive target ownership, cancellation, and per-handle cleanup without global banner destruction. — Thanks @imjlk!
+- [aa4fa44](https://github.com/imjlk/ait-kit/commit/aa4fa44bbb08a11354adbb5e90ec8f359025b7bb) Add read-only completed/refunded order history with RN cursor paging and explicit WebView first-page-only limits. — Thanks @imjlk!
+
 ## 0.4.0 — 2026-09-22
 
 ### Minor changes
