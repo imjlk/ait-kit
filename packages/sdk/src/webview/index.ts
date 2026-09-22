@@ -86,3 +86,5 @@ export { createWebPromotion, type WebPromotionOptions } from "./promotion.js";
 
 export { createWebViewAds, type WebViewAds, type WebViewAdsOptions, type SdkAdType } from "./ads.js";
 export type { LoadFullScreenAdParams, FullScreenAdShowEvent, ShowFullScreenAdParams, FullScreenAdFunctions, FullScreenAdSupport } from "../ads/platform-contract.js";
+
+export { createWebViewBannerAds, type WebViewBannerAds, type WebViewBannerAdsOptions, type WebViewBannerHandle, type WebViewBannerOptions, type WebViewBannerCallbacks, type WebViewBannerEvent, type WebViewBannerError } from "./banner.js";

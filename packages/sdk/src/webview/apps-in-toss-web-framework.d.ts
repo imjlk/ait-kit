@@ -13,6 +13,9 @@ declare module "@apps-in-toss/web-framework" {
   export const loadFullScreenAd: FullScreenAdSupport["loadFullScreenAd"];
   export const showFullScreenAd: FullScreenAdSupport["showFullScreenAd"];
 
+  import type { WebViewBannerPlatform } from "./banner-contract.js";
+  export const TossAds: NonNullable<WebViewBannerPlatform["TossAds"]>;
+
   export const Promotion: {
     grantReward: ((input: { promotionCode: string; amount: number }) => Promise<{ key: string }>) & { isSupported: () => boolean };
   };
