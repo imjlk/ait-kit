@@ -9,6 +9,10 @@ declare module "@apps-in-toss/web-framework" {
   import type { WebViewIapFramework } from "./iap-contract.js";
   import type { NotificationAgreementParams } from "../notification/platform-contract.js";
 
+  import type { FullScreenAdSupport } from "../ads/platform-contract.js";
+  export const loadFullScreenAd: FullScreenAdSupport["loadFullScreenAd"];
+  export const showFullScreenAd: FullScreenAdSupport["showFullScreenAd"];
+
   export const Promotion: {
     grantReward: ((input: { promotionCode: string; amount: number }) => Promise<{ key: string }>) & { isSupported: () => boolean };
   };

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { SdkError } from "../src";
 import { createReactNativeAds } from "../src/rn";
+import { createWebViewAds } from "../src/webview";
 import type { FullScreenAdShowEvent, FullScreenAdSupport } from "../src/rn";
 
 interface FrameworkCall {
@@ -50,7 +51,8 @@ function fakeFramework(handler: ScriptedHandler): FullScreenAdSupport & {
   return { loadFullScreenAd: load, showFullScreenAd: show, calls, cleanupCount: () => cleanups };
 }
 
-describe("@ait-kit/sdk/rn ads", () => {
+for (const createAds of [createReactNativeAds, createWebViewAds]) {
+describe(createAds.name, () => {
   test("resolves a rewarded show only from the userEarnedReward event", async () => {
     const framework = fakeFramework((call) => {
       if (call.phase === "load") {
@@ -65,7 +67,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         call.emit({ type: "dismissed" });
       });
     });
-    const ads = createReactNativeAds({ framework });
+    const ads = createAds({ framework });
 
     await ads.loadFullScreenAd("group-a");
     const result = await ads.showFullScreenAd("group-a");
@@ -89,7 +91,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         });
       }
     });
-    const ads = createReactNativeAds({ framework });
+    const ads = createAds({ framework });
 
     await ads.loadFullScreenAd("group-a");
     await expect(ads.showFullScreenAd("group-a")).resolves.toEqual({ status: "dismissed" });
@@ -103,7 +105,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         queueMicrotask(() => call.error(new Error("bridge gone")));
       }
     });
-    const failingAds = createReactNativeAds({ framework: failing });
+    const failingAds = createAds({ framework: failing });
     await failingAds.loadFullScreenAd("group-b");
     await expect(failingAds.showFullScreenAd("group-b")).resolves.toMatchObject({
       status: "failed",
@@ -117,7 +119,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         queueMicrotask(() => call.emit({ type: "failedToShow" }));
       }
     });
-    const notShownAds = createReactNativeAds({ framework: notShown });
+    const notShownAds = createAds({ framework: notShown });
     await notShownAds.loadFullScreenAd("group-c");
     await expect(notShownAds.showFullScreenAd("group-c")).resolves.toEqual({
       status: "failed",
@@ -132,7 +134,7 @@ describe("@ait-kit/sdk/rn ads", () => {
       }
       // Show registers but never emits.
     });
-    const ads = createReactNativeAds({ framework, showTimeoutMs: 20 });
+    const ads = createAds({ framework, showTimeoutMs: 20 });
     await ads.loadFullScreenAd("group-a");
 
     await expect(ads.showFullScreenAd("group-a")).resolves.toEqual({
@@ -152,7 +154,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         queueMicrotask(() => call.emit({ type: "loaded" }));
       }
     });
-    const ads = createReactNativeAds({ framework, loadTimeoutMs: 100 });
+    const ads = createAds({ framework, loadTimeoutMs: 100 });
 
     await expect(ads.loadFullScreenAd("group-a")).rejects.toMatchObject({
       code: "AD_LOAD_FAILED",
@@ -168,7 +170,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         queueMicrotask(() => call.emit({ type: "loaded" }));
       }
     });
-    const ads = createReactNativeAds({ framework });
+    const ads = createAds({ framework });
 
     const [first, second] = await Promise.all([
       ads.loadFullScreenAd("group-a"),
@@ -187,7 +189,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         queueMicrotask(() => call.emit({ type: "dismissed" }));
       }
     });
-    const ads = createReactNativeAds({ framework });
+    const ads = createAds({ framework });
 
     await expect(ads.showFullScreenAd("group-a")).rejects.toMatchObject({ code: "AD_NOT_LOADED" });
 
@@ -208,7 +210,7 @@ describe("@ait-kit/sdk/rn ads", () => {
       }
       // Show registers but never emits until the test drives it.
     });
-    const ads = createReactNativeAds({ framework, showTimeoutMs: 5_000 });
+    const ads = createAds({ framework, showTimeoutMs: 5_000 });
 
     await ads.loadFullScreenAd("group-a");
     const first = ads.showFullScreenAd("group-a");
@@ -234,7 +236,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         queueMicrotask(() => call.emit({ type: "loaded" }));
       }
     });
-    const ads = createReactNativeAds({ framework });
+    const ads = createAds({ framework });
 
     const loading = ads.loadFullScreenAd("group-a");
     await expect(ads.showFullScreenAd("group-a")).rejects.toMatchObject({ code: "AD_NOT_LOADED" });
@@ -253,7 +255,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         queueMicrotask(() => call.emit({ type: "loaded" }));
       }
     });
-    const ads = createReactNativeAds({ framework, showTimeoutMs: 5_000 });
+    const ads = createAds({ framework, showTimeoutMs: 5_000 });
 
     await ads.loadFullScreenAd("group-a");
     const showing = ads.showFullScreenAd("group-a");
@@ -276,7 +278,7 @@ describe("@ait-kit/sdk/rn ads", () => {
   });
 
   test("bounds framework acquisition with the load deadline", async () => {
-    const ads = createReactNativeAds({
+    const ads = createAds({
       framework: () => new Promise(() => {}), // loader never resolves
       loadTimeoutMs: 20
     });
@@ -292,7 +294,7 @@ describe("@ait-kit/sdk/rn ads", () => {
       // Show registers but never emits; the test drives it.
     });
     let stallNextLoaderCall = false;
-    const ads = createReactNativeAds({
+    const ads = createAds({
       framework: () => {
         if (stallNextLoaderCall) {
           stallNextLoaderCall = false;
@@ -329,7 +331,7 @@ describe("@ait-kit/sdk/rn ads", () => {
     });
     let firstLoaderCall = true;
     let resolveFirst: (value: { available: true; module: typeof framework }) => void = () => {};
-    const ads = createReactNativeAds({
+    const ads = createAds({
       framework: () => {
         if (firstLoaderCall) {
           firstLoaderCall = false;
@@ -366,7 +368,7 @@ describe("@ait-kit/sdk/rn ads", () => {
     const framework = fakeFramework(() => {
       // Load registration is driven manually by the test.
     });
-    const ads = createReactNativeAds({
+    const ads = createAds({
       framework: () =>
         Bun.sleep(40).then(() => ({ available: true as const, module: framework })),
       loadTimeoutMs: 50
@@ -396,7 +398,7 @@ describe("@ait-kit/sdk/rn ads", () => {
       }
       // Show registration is driven manually by the test.
     });
-    const ads = createReactNativeAds({
+    const ads = createAds({
       framework: () =>
         Bun.sleep(40).then(() => ({ available: true as const, module: framework })),
       showTimeoutMs: 50
@@ -422,7 +424,7 @@ describe("@ait-kit/sdk/rn ads", () => {
       }
       // Show registers but never emits.
     });
-    const ads = createReactNativeAds({ framework, showTimeoutMs: 25 });
+    const ads = createAds({ framework, showTimeoutMs: 25 });
     await ads.loadFullScreenAd("group-a");
     const cleanupsBeforeShow = framework.cleanupCount();
 
@@ -440,7 +442,7 @@ describe("@ait-kit/sdk/rn ads", () => {
     const framework = fakeFramework(() => {
       // Load registers but never emits.
     });
-    const ads = createReactNativeAds({ framework, loadTimeoutMs: 25 });
+    const ads = createAds({ framework, loadTimeoutMs: 25 });
 
     await expect(ads.loadFullScreenAd("group-a")).rejects.toMatchObject({
       code: "AD_LOAD_TIMEOUT"
@@ -460,7 +462,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         call.emit({ type: "loaded" });
       }
     });
-    const ads = createReactNativeAds({ framework });
+    const ads = createAds({ framework });
 
     // No sleep: the retry must observe the slot as already freed.
     try {
@@ -480,7 +482,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         queueMicrotask(() => call.emit({ type: "dismissed" }));
       }
     });
-    const ads = createReactNativeAds({ framework });
+    const ads = createAds({ framework });
 
     await ads.loadFullScreenAd("group-a");
     // No sleep: the slot must already be promoted when the caller resumes.
@@ -496,7 +498,7 @@ describe("@ait-kit/sdk/rn ads", () => {
     });
     let resolveStalled: (value: { available: true; module: typeof framework }) => void = () => {};
     let stall = false;
-    const ads = createReactNativeAds({
+    const ads = createAds({
       framework: () => {
         if (stall) {
           stall = false;
@@ -528,7 +530,7 @@ describe("@ait-kit/sdk/rn ads", () => {
       }
       // Show calls are driven manually by the test.
     });
-    const ads = createReactNativeAds({ framework, showTimeoutMs: 20 });
+    const ads = createAds({ framework, showTimeoutMs: 20 });
 
     await ads.loadFullScreenAd("group-a");
     const stale = ads.showFullScreenAd("group-a");
@@ -555,7 +557,7 @@ describe("@ait-kit/sdk/rn ads", () => {
 
   test("rejects with SDK_UNAVAILABLE when the framework is missing", async () => {
     let attempts = 0;
-    const ads = createReactNativeAds({
+    const ads = createAds({
       framework: async () => {
         attempts += 1;
         return { available: false, reason: "not installed" };
@@ -572,7 +574,7 @@ describe("@ait-kit/sdk/rn ads", () => {
         call.emit({ type: "loaded" });
       }
     });
-    const recovered = createReactNativeAds({
+    const recovered = createAds({
       framework: async () => {
         attempts += 1;
         return { available: true, module: framework };
@@ -585,7 +587,7 @@ describe("@ait-kit/sdk/rn ads", () => {
   test("reports UNSUPPORTED when the ads APIs are not supported", async () => {
     const framework = fakeFramework(() => {});
     (framework.loadFullScreenAd as { isSupported?: () => boolean }).isSupported = () => false;
-    const ads = createReactNativeAds({ framework });
+    const ads = createAds({ framework });
 
     await expect(ads.loadFullScreenAd("group-a")).rejects.toMatchObject({ code: "UNSUPPORTED" });
   });
@@ -609,7 +611,7 @@ describe("@ait-kit/sdk/rn ads", () => {
     }) as typeof framework.showFullScreenAd;
     (framework.showFullScreenAd as { isSupported?: () => boolean }).isSupported = () => true;
 
-    const ads = createReactNativeAds({ framework });
+    const ads = createAds({ framework });
     await ads.loadFullScreenAd("group-a");
 
     await expect(ads.showFullScreenAd("group-a")).rejects.toThrow("bridge not ready");
@@ -617,3 +619,5 @@ describe("@ait-kit/sdk/rn ads", () => {
     await expect(ads.showFullScreenAd("group-a")).rejects.toMatchObject({ code: "AD_NOT_LOADED" });
   });
 });
+
+}

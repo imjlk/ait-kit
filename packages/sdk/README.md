@@ -97,7 +97,7 @@ SDK initialization never grants or completes pending orders by itself.
 | Subscription purchase | ✅ | ✅ | `offerId` optional; `subscriptionId` surfaced on completion |
 | Pending orders | ✅ | ✅ | recovery is consumer-driven |
 | Grant completion notify | ✅ | ✅ | sent only after server grant confirms |
-| Full-screen ads | ✅ | ➖ | ads are RN-only today |
+| Full-screen / rewarded ads | ✅ | ✅ | reward events only; reload after each show |
 | Notification agreement | ✅ | ✅ | event-based, one template per request |
 | Share link / share sheet | ✅ | ✅ | `intoss://` paths; `completed` ≠ shared |
 | Unsupported app version | `SdkError("UNSUPPORTED")` | same | per-function `isSupported` gates |
@@ -197,11 +197,12 @@ Contracts:
   stay with the consumer. (Renamed from `closed` in 0.3.0; see Migrating.)
 - Unsupported surfaces/app versions reject with `SdkError("UNSUPPORTED")`.
 
-## React Native full-screen ads
+## React Native and WebView full-screen ads
 
 ```ts
 import { createReactNativeAds } from "@ait-kit/sdk/rn";
 
+// WebView: import { createWebViewAds } from "@ait-kit/sdk/webview";
 const ads = createReactNativeAds();
 await ads.loadFullScreenAd("AD_GROUP_ID"); // joins an in-flight duplicate load
 const result = await ads.showFullScreenAd("AD_GROUP_ID");
@@ -243,8 +244,7 @@ Behavior:
 
 The SDK provides ad behavior and outcomes. Your application owns server-side
 ad reward requests, user session checks, payout limits, and ledger updates.
-(Login/anonymous-key helpers and storage arrive in later entries, as do
-notification and sharing.)
+Identity, storage, notification, and sharing adapters are also available in both entries.
 
 ## Versioning
 
@@ -410,3 +410,7 @@ Use `@ait-kit/sdk/webview` and the `createWebView*` factories / `WebView*` types
 The legacy `@ait-kit/sdk/web` entry, `createWeb*` factories, and `Web*` types remain
 available as deprecated aliases with identical behavior. The official peer package
 name remains `@apps-in-toss/web-framework`.
+
+WebView ads use the official flat `loadFullScreenAd` and `showFullScreenAd` exports.
+Create them with `createWebViewAds()` from `@ait-kit/sdk/webview`; the same
+load/show deadlines, single-use rules, and reward-event semantics described above apply.
