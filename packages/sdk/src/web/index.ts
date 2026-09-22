@@ -69,3 +69,5 @@ export function createWebIap(options: WebIapOptions) {
       : async () => ({ available: true, module: options.framework as PartialIapPlatformSdk });
   return createIapAdapter({ ...options, loader });
 }
+
+export { createWebReview, type WebReviewOptions } from "./review.js";

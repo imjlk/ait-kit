@@ -293,3 +293,33 @@ resolving `undefined` (installed app below the feature's minimum version)
 now rejects with `SdkError("UNSUPPORTED")` instead of
 `INVALID_ANONYMOUS_KEY`; the `"ERROR"` sentinel still rejects with
 `INVALID_ANONYMOUS_KEY`.
+
+## Review requests
+
+```ts
+import { createReactNativeReview } from "@ait-kit/sdk/rn";
+// Web: import { createWebReview } from "@ait-kit/sdk/web";
+const review = createReactNativeReview(); // share one instance across screens
+if (await review.isSupported()) await review.request();
+```
+
+`ReviewAdapter` is a runtime-neutral root type. Factories accept `framework`
+(shared `Review.request` contract or async loader), like the existing adapters.
+RN translates the official `requestReview()` export; Web calls `Review.request()`.
+The official SDK loads only on use. Missing features/support checkers return
+`false`; import failure throws `SDK_UNAVAILABLE`; support-check exceptions propagate.
+`request()` rechecks support and throws `UNSUPPORTED` when unavailable.
+Concurrent requests on one instance share one Promise, cleared after success or
+failure. There is no retry or timeout.
+
+`Promise<void>` completion does not establish whether UI appeared or a review
+was written. Never grant rewards, unlock features, or block navigation on review
+completion. Complete and persist the core action first, then start a separately
+error-handled review request without awaiting it in the core flow. The consumer
+owns request timing, session limits, cooldowns and storage. Do not log raw SDK
+errors by default.
+
+Official reference: [Review.request](https://developers-apps-in-toss.toss.im/documentation/sdk/domains-api/review/review.request.md)
+(Android/iOS Toss 5.253.0+, checked by the SDK). Verified package surfaces:
+RN 2.10.10 and Web 3.4.0. Device UI behavior requires separate manual verification;
+unit/tarball tests use injected SDKs or a stubbed native bridge.

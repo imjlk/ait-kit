@@ -219,3 +219,5 @@ export class SdkError extends Error {
     this.code = code;
   }
 }
+
+export type { ReviewAdapter } from "./review/platform-contract.js";

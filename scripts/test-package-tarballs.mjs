@@ -599,6 +599,7 @@ function verifySdkPlatformIsolation(packedPackage, installDir, tempDir, installC
   createReactNativeIdentity,
   createReactNativeIap,
   createReactNativeNotification,
+  createReactNativeReview,
   createReactNativeShare,
   createReactNativeStorage
 } from ${JSON.stringify(`${packedPackage.name}/rn`)};`,
@@ -607,6 +608,7 @@ export const iap = createReactNativeIap({ grant: async () => {} });
 export const identity = createReactNativeIdentity();
 export const storage = createReactNativeStorage();
 export const notification = createReactNativeNotification();
+export const review = createReactNativeReview();
 export const share = createReactNativeShare();
 export async function crossEntryInstanceofCheck(): Promise<boolean> {
   try {
@@ -630,6 +632,8 @@ export async function missingCapabilityCheck(): Promise<boolean> {
     }
   };
   return (
+    !(await review.isSupported()) &&
+    (await expectUnsupported(() => review.request(), "review")) &&
     (await expectUnsupported(() => identity.login(), "login")) &&
     (await expectUnsupported(() => identity.getAnonymousKey(), "anonymous key")) &&
     (await expectUnsupported(() => share.createLink("intoss://stub"), "share link")) &&
@@ -654,6 +658,7 @@ if (!(await missingCapabilityCheck())) {
   createWebIap,
   createWebIdentity,
   createWebNotification,
+  createWebReview,
   createWebShare,
   createWebStorage
 } from ${JSON.stringify(`${packedPackage.name}/web`)};`,
@@ -661,6 +666,7 @@ if (!(await missingCapabilityCheck())) {
 export const identity = createWebIdentity();
 export const storage = createWebStorage();
 export const notification = createWebNotification();
+export const review = createWebReview();
 export const share = createWebShare();
 export async function crossEntryInstanceofCheck(): Promise<boolean> {
   try {
@@ -681,6 +687,8 @@ export async function missingCapabilityCheck(): Promise<boolean> {
     }
   };
   return (
+    !(await review.isSupported()) &&
+    (await expectUnsupported(() => review.request(), "review")) &&
     (await expectUnsupported(() => identity.login(), "login")) &&
     (await expectUnsupported(() => share.createLink("intoss://stub"), "share link")) &&
     (await expectUnsupported(() => share.sendMessage("x"), "share sheet")) &&
@@ -776,6 +784,29 @@ ${platform.consumerBody}
     // the missing-capability UNSUPPORTED checks must hold at runtime
     // against the installed tarball.
     run(process.execPath, [join(fixtureDir, "consumer.js")], fixtureDir);
+    // A real dynamic import fails once, then resolves the installed stub.
+    // Exercise the DEFAULT loader cache rather than a replacement loader.
+    writeFileSync(join(fixtureDir, "retry-loader.mjs"), `
+let failed = false;
+export async function resolve(specifier, context, nextResolve) {
+  if (specifier === ${JSON.stringify(platform.platformPackage)} && !failed) {
+    failed = true;
+    throw new Error("fixture transient import failure");
+  }
+  return nextResolve(specifier, context);
+}
+`);
+    const reviewFactory = platform.subpath === "rn" ? "createReactNativeReview" : "createWebReview";
+    writeFileSync(join(fixtureDir, "retry.mjs"), `
+import { ${reviewFactory} } from ${JSON.stringify(`${packedPackage.name}/${platform.subpath}`)};
+const review = ${reviewFactory}();
+let unavailable = false;
+try { await review.isSupported(); } catch (error) { unavailable = error.code === "SDK_UNAVAILABLE"; }
+if (!unavailable) throw new Error("first import must fail observably");
+if (await review.isSupported() !== false) throw new Error("retry must load the stub's missing capability");
+`);
+    run(process.execPath, ["--loader", "./retry-loader.mjs", "retry.mjs"], fixtureDir);
+
   }
 }
 
@@ -1010,6 +1041,7 @@ import {
   getAnonymousKey,
   getTossShareLink,
   requestNotificationAgreement,
+  requestReview,
   share
 } from "${RN_PLATFORM_PACKAGE}";
 
@@ -1054,6 +1086,8 @@ export const stubRequestNotificationAgreement: RequestNotificationAgreement = ()
 export const stubGetTossShareLink: GetTossShareLink = (path) => Promise.resolve(\`https://toss.im/\${path}\`);
 export const stubShare: Share = () => Promise.resolve();
 
+export const reviewType: () => Promise<void> = requestReview;
+export const reviewSupportType: () => boolean = requestReview.isSupported;
 export const canary = { env, useGeolocation };
 `;
 
@@ -1061,7 +1095,7 @@ export const canary = { env, useGeolocation };
 // Canary: TossAuth.isIntegrated exists in the official package but NOT in
 // @ait-kit/sdk's ambient declaration — if the ambient masked the real
 // types, this file would not compile.
-import { Notification, Share, TossAuth, User } from "${WEB_PLATFORM_PACKAGE}";
+import { Notification, Review, Share, TossAuth, User } from "${WEB_PLATFORM_PACKAGE}";
 
 export async function loginType(): Promise<{ authorizationCode: string; referrer: "DEFAULT" | "SANDBOX" }> {
   return TossAuth.login();
@@ -1090,6 +1124,8 @@ export function shareType(message: string): Promise<void> {
   return Share.sendMessage({ message });
 }
 
+export const reviewType: () => Promise<void> = Review.request;
+export const reviewSupportType: () => boolean = Review.request.isSupported;
 export const canary = { isIntegrated: TossAuth.isIntegrated };
 `;
 
@@ -1097,6 +1133,7 @@ export const canary = { isIntegrated: TossAuth.isIntegrated };
 import {
   createReactNativeIdentity,
   createReactNativeNotification,
+  createReactNativeReview,
   createReactNativeShare,
   createReactNativeStorage
 } from "${packedPackage.name}/rn";
@@ -1124,6 +1161,16 @@ function expectBridgeRejection(error: unknown, label: string): void {
   if (!message.includes(BRIDGE_ERROR)) {
     throw new Error(\`\${label}: rejection did not come from the stubbed bridge: \${message}\`);
   }
+}
+
+(globalThis as { __appsInToss?: unknown }).__appsInToss = { brandDisplayName: "fixture" };
+const review = createReactNativeReview();
+if (!(await review.isSupported())) throw new FixtureFailure("review: expected support");
+try {
+  await review.request();
+  throw new FixtureFailure("review: expected bridge rejection");
+} catch (error) {
+  expectBridgeRejection(error, "review");
 }
 
 // 1. Identity: the real appLogin/getAnonymousKey run and their bridge
@@ -1208,6 +1255,7 @@ try {
 import {
   createWebIdentity,
   createWebNotification,
+  createWebReview,
   createWebShare,
   createWebStorage
 } from "${packedPackage.name}/web";
@@ -1222,6 +1270,7 @@ import {
 (globalThis as { window?: unknown }).window = {
   ReactNativeWebView: null,
   __appsInTossConstants: {
+    isRequestReviewSupported: true,
     tossAppVersion: "9.9.9",
     operationalEnvironment: "toss",
     platformOS: "android"
@@ -1244,6 +1293,14 @@ function expectWebviewRejection(error: unknown, label: string): void {
   }
 }
 
+const review = createWebReview();
+if (!(await review.isSupported())) throw new FixtureFailure("review: expected support");
+try {
+  await review.request();
+  throw new FixtureFailure("review: expected webview rejection");
+} catch (error) {
+  expectWebviewRejection(error, "review");
+}
 const identity = createWebIdentity();
 try {
   await identity.login();
