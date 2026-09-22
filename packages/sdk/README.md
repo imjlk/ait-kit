@@ -13,20 +13,20 @@ npm install @ait-kit/sdk
 |---|---|
 | `@ait-kit/sdk` (root) | Runtime-neutral shared contracts: ad + IAP types, `SdkError`. Importable anywhere — plain Node, web, React Native — with no official SDK installed. |
 | `@ait-kit/sdk/rn` | React Native adapters (full-screen ads, IAP). Requires the official `@apps-in-toss/framework`, declared as an **optional peer** and imported lazily. Never requires the web SDK. |
-| `@ait-kit/sdk/web` | Web adapters (IAP). Requires the official `@apps-in-toss/web-framework`, declared as an **optional peer** and imported lazily. Never requires the React Native SDK. |
+| `@ait-kit/sdk/webview` | WebView adapters for purchases, identity, storage, notifications, sharing, reviews, and promotions. Requires the official `@apps-in-toss/web-framework`, declared as an **optional peer** and imported lazily. Never requires the React Native SDK. |
 
 The two platform entries share one internal engine but keep completely
 separate SDK connections — in JavaScript and in the shipped type
 declarations — so an `/rn` consumer never installs the web package and vice
 versa.
 
-## In-app purchases (RN + Web)
+## In-app purchases (RN + WebView)
 
 Both entries expose the same IAP surface; only the loader differs:
 
 ```ts
 import { createReactNativeIap } from "@ait-kit/sdk/rn";   // or:
-import { createWebIap } from "@ait-kit/sdk/web";
+import { createWebViewIap } from "@ait-kit/sdk/webview";
 
 const iap = createReactNativeIap({
   // The ONLY place product delivery happens. Resolve only after YOUR
@@ -90,7 +90,7 @@ SDK initialization never grants or completes pending orders by itself.
 
 ### Feature matrix
 
-| Capability | `/rn` | `/web` | Notes |
+| Capability | `/rn` | `/webview` | Notes |
 |---|---|---|---|
 | Product list | ✅ | ✅ | one-time + subscription together |
 | One-time purchase | ✅ | ✅ | grant callback contract applies |
@@ -104,11 +104,11 @@ SDK initialization never grants or completes pending orders by itself.
 
 Notification and sharing adapters ship in both entries (see below).
 
-## Login, anonymous identity, and storage (RN + Web)
+## Login, anonymous identity, and storage (RN + WebView)
 
 ```ts
 import { createReactNativeIdentity, createReactNativeStorage } from "@ait-kit/sdk/rn";
-// or: import { createWebIdentity, createWebStorage } from "@ait-kit/sdk/web";
+// or: import { createWebViewIdentity, createWebViewStorage } from "@ait-kit/sdk/webview";
 
 const identity = createReactNativeIdentity();
 
@@ -153,14 +153,14 @@ Contracts:
 - Session invalidation when the anonymous identifier changes, migration of
   previously stored keys, and bootstrap sequencing stay with the consumer.
 
-## Notification agreement and sharing (RN + Web)
+## Notification agreement and sharing (RN + WebView)
 
 ```ts
 import {
   createReactNativeNotification,
   createReactNativeShare
 } from "@ait-kit/sdk/rn";
-// or: import { createWebNotification, createWebShare } from "@ait-kit/sdk/web";
+// or: import { createWebViewNotification, createWebViewShare } from "@ait-kit/sdk/webview";
 
 // 1. Notification agreement: one template, one request.
 const notification = createReactNativeNotification();
@@ -259,7 +259,7 @@ official releases (see `scripts/test-package-tarballs.mjs`):
 | Official package | Verified version | Peer range |
 |---|---|---|
 | `@apps-in-toss/framework` (RN) | 2.10.10 | `>=2.10.10` |
-| `@apps-in-toss/web-framework` (Web) | 3.4.0 | `>=3.4.0` |
+| `@apps-in-toss/web-framework` (WebView) | 3.4.0 | `>=3.4.0` |
 
 Older versions may work where the runtime surfaces match (every capability
 is checked per function and missing ones reject with `UNSUPPORTED`), but
@@ -298,14 +298,14 @@ now rejects with `SdkError("UNSUPPORTED")` instead of
 
 ```ts
 import { createReactNativeReview } from "@ait-kit/sdk/rn";
-// Web: import { createWebReview } from "@ait-kit/sdk/web";
+// WebView: import { createWebViewReview } from "@ait-kit/sdk/webview";
 const review = createReactNativeReview(); // share one instance across screens
 if (await review.isSupported()) await review.request();
 ```
 
 `ReviewAdapter` is a runtime-neutral root type. Factories accept `framework`
 (shared `Review.request` contract or async loader), like the existing adapters.
-RN translates the official `requestReview()` export; Web calls `Review.request()`.
+RN translates the official `requestReview()` export; WebView calls `Review.request()`.
 The official SDK loads only on use. Missing features/support checkers return
 `false`; import failure throws `SDK_UNAVAILABLE`; support-check exceptions propagate.
 `request()` rechecks support and throws `UNSUPPORTED` when unavailable.
@@ -321,14 +321,14 @@ errors by default.
 
 Official reference: [Review.request](https://developers-apps-in-toss.toss.im/documentation/sdk/domains-api/review/review.request.md)
 (Android/iOS Toss 5.253.0+, checked by the SDK). Verified package surfaces:
-RN 2.10.10 and Web 3.4.0. Device UI behavior requires separate manual verification;
+RN 2.10.10 and WebView 3.4.0. Device UI behavior requires separate manual verification;
 unit/tarball tests use injected SDKs or a stubbed native bridge.
 
 ## Explicit direct promotion rewards
 
 ```ts
 import { createReactNativePromotion } from "@ait-kit/sdk/rn";
-// Web: import { createWebPromotion } from "@ait-kit/sdk/web";
+// WebView: import { createWebViewPromotion } from "@ait-kit/sdk/webview";
 const promotion = createReactNativePromotion({ timeoutMs: 15_000 });
 const support = await promotion.getSupport();
 // RN 2.10.10 exposes no support checker: support is "unknown", not "supported".
@@ -339,14 +339,14 @@ const support = await promotion.getSupport();
 `PromotionGrantResult` are runtime-neutral root types. Both factories accept
 `framework` (shared `Promotion.grantReward` contract or async loader).
 RN calls `grantPromotionReward({ params: { promotionCode, amount } })`;
-Web calls only `Promotion.grantReward({ promotionCode, amount })`.
-There is no legacy Web fallback or fallback to/from server payment flows.
+WebView calls only `Promotion.grantReward({ promotionCode, amount })`.
+There is no legacy WebView fallback or fallback to/from server payment flows.
 
 `getSupport()` reports `unsupported` for missing functions or an explicit false
 check, `supported` for a true check, and `unknown` when a function has no checker.
 Import failures throw `SDK_UNAVAILABLE`; support-check exceptions propagate.
 Every grant rechecks support. RN's documented `undefined` and the provider's
-`UNSUPPORTED_APP_VERSION` throw `UNSUPPORTED`; malformed Web responses stay unknown.
+`UNSUPPORTED_APP_VERSION` throw `UNSUPPORTED`; malformed WebView responses stay unknown.
 
 Input errors throw `INVALID_PROMOTION_INPUT` before loading/calling the SDK:
 `promotionCode` must be non-empty without surrounding whitespace (never trimmed
@@ -400,6 +400,13 @@ payment path. This API does not require client-side mTLS certificates/proxy toke
 and does not replace TrailBase claims or owned-currency accounting.
 
 Official reference: [Promotion.grantReward](https://developers-apps-in-toss.toss.im/documentation/sdk/domains-api/promotion/promotion.grantreward.md).
-Contracts are checked against RN 2.10.10 and Web 3.4.0 published types/code with
+Contracts are checked against RN 2.10.10 and WebView 3.4.0 published types/code with
 synthetic bridge fixtures. Device checks and official test-promotion calls remain
 manual; no real promotion is invoked by tests.
+
+### WebView naming migration
+
+Use `@ait-kit/sdk/webview` and the `createWebView*` factories / `WebView*` types.
+The legacy `@ait-kit/sdk/web` entry, `createWeb*` factories, and `Web*` types remain
+available as deprecated aliases with identical behavior. The official peer package
+name remains `@apps-in-toss/web-framework`.

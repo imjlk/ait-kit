@@ -1,5 +1,5 @@
 import { resolvePlatformLoader } from "../platform-loader.js";
-import { createWebPlatformLoader } from "./platform-loader.js";
+import { createWebViewPlatformLoader } from "./platform-loader.js";
 import {
   SdkError,
   type SdkNotificationAgreementResult,
@@ -19,9 +19,9 @@ import {
 
 const DEFAULT_AGREEMENT_TIMEOUT_MS = 60_000;
 
-export interface WebNotificationOptions {
+export interface WebViewNotificationOptions {
   /**
-   * Web framework injection: pass a module exposing Notification or a
+   * WebView framework injection: pass a module exposing Notification or a
    * custom loader. Defaults to the lazy `import("@apps-in-toss/web-framework")`
    * loader.
    */
@@ -30,13 +30,13 @@ export interface WebNotificationOptions {
   timeoutMs?: number;
 }
 
-export interface WebNotification {
+export interface WebViewNotification {
   /** See ReactNativeNotification.requestAgreement for the contract. */
   requestAgreement(templateCode: string): Promise<SdkNotificationAgreementResult>;
 }
 
-export function createWebNotification(options: WebNotificationOptions = {}): WebNotification {
-  const loader = normalizeWebNotificationLoader(options.framework);
+export function createWebViewNotification(options: WebViewNotificationOptions = {}): WebViewNotification {
+  const loader = normalizeWebViewNotificationLoader(options.framework);
   const timeoutMs = options.timeoutMs ?? DEFAULT_AGREEMENT_TIMEOUT_MS;
   return {
     requestAgreement(templateCode: string): Promise<SdkNotificationAgreementResult> {
@@ -50,16 +50,16 @@ export function createWebNotification(options: WebNotificationOptions = {}): Web
   };
 }
 
-export interface WebShareOptions {
+export interface WebViewShareOptions {
   /**
-   * Web framework injection: pass a module exposing Share or a custom
+   * WebView framework injection: pass a module exposing Share or a custom
    * loader. Defaults to the lazy `import("@apps-in-toss/web-framework")`
    * loader.
    */
   framework?: SharePlatformSdk | SharePlatformLoader;
 }
 
-export interface WebShare {
+export interface WebViewShare {
   /** Creates a share link for an `intoss://` deeplink path. */
   createLink(path: string, ogImageUrl?: string): Promise<string>;
   /**
@@ -70,8 +70,8 @@ export interface WebShare {
   sendMessage(message: string): Promise<SdkShareUiResult>;
 }
 
-export function createWebShare(options: WebShareOptions = {}): WebShare {
-  const loader = normalizeWebShareLoader(options.framework);
+export function createWebViewShare(options: WebViewShareOptions = {}): WebViewShare {
+  const loader = normalizeWebViewShareLoader(options.framework);
   const load = async (): Promise<SharePlatformSdk> => {
     const result = await loader();
     if (!result.available) {
@@ -112,26 +112,26 @@ export function createWebShare(options: WebShareOptions = {}): WebShare {
   };
 }
 
-function normalizeWebNotificationLoader(
-  framework: WebNotificationOptions["framework"]
+function normalizeWebViewNotificationLoader(
+  framework: WebViewNotificationOptions["framework"]
 ): NotificationPlatformLoader {
-  return resolvePlatformLoader(framework, createDefaultWebNotificationLoader);
+  return resolvePlatformLoader(framework, createDefaultWebViewNotificationLoader);
 }
 
-function normalizeWebShareLoader(
-  framework: WebShareOptions["framework"]
+function normalizeWebViewShareLoader(
+  framework: WebViewShareOptions["framework"]
 ): SharePlatformLoader {
-  return resolvePlatformLoader(framework, createDefaultWebShareLoader);
+  return resolvePlatformLoader(framework, createDefaultWebViewShareLoader);
 }
 
-// See createDefaultWebIdentityLoader in ./identity.ts: the web SDK already
+// See createDefaultWebViewIdentityLoader in ./identity.ts: the web SDK already
 // matches the shared contract shapes, so no conversion or assertion is used.
-function createDefaultWebNotificationLoader(): NotificationPlatformLoader {
-  return createWebPlatformLoader(module => ({ available: true, module: module }));
+function createDefaultWebViewNotificationLoader(): NotificationPlatformLoader {
+  return createWebViewPlatformLoader(module => ({ available: true, module: module }));
 }
 
-function createDefaultWebShareLoader(): SharePlatformLoader {
-  return createWebPlatformLoader(module => ({ available: true, module: module }));
+function createDefaultWebViewShareLoader(): SharePlatformLoader {
+  return createWebViewPlatformLoader(module => ({ available: true, module: module }));
 }
 
 /**
@@ -209,3 +209,16 @@ async function loadNotificationPlatform(
   }
   return result.module;
 }
+
+/** @deprecated Use createWebViewNotification from @ait-kit/sdk/webview. */
+export const createWebNotification = createWebViewNotification;
+/** @deprecated Use createWebViewShare from @ait-kit/sdk/webview. */
+export const createWebShare = createWebViewShare;
+/** @deprecated Use WebViewNotification from @ait-kit/sdk/webview. */
+export type WebNotification = WebViewNotification;
+/** @deprecated Use WebViewNotificationOptions from @ait-kit/sdk/webview. */
+export type WebNotificationOptions = WebViewNotificationOptions;
+/** @deprecated Use WebViewShare from @ait-kit/sdk/webview. */
+export type WebShare = WebViewShare;
+/** @deprecated Use WebViewShareOptions from @ait-kit/sdk/webview. */
+export type WebShareOptions = WebViewShareOptions;

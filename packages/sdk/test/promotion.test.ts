@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { createReactNativePromotion } from "../src/rn/promotion.js";
-import { createWebPromotion } from "../src/web/promotion.js";
+import { createWebViewPromotion } from "../src/webview/promotion.js";
 import { adaptOfficialRnPromotion } from "../src/rn/official-module.js";
 
 const input = { promotionCode: "SYNTHETIC_TEST_CODE", amount: 10 };
-for (const create of [createReactNativePromotion, createWebPromotion]) {
+for (const create of [createReactNativePromotion, createWebViewPromotion]) {
   describe(create.name, () => {
     test("reports missing capability, absent checker and explicit support distinctly", async () => {
       expect(await create({ framework: {} }).getSupport()).toBe("unsupported");
@@ -179,6 +179,6 @@ test("RN conversion wraps params, preserves receiver and treats undefined as uns
   expect(await adapter.grantReward(input)).toEqual({ status: "granted", rewardKey: "rn-key" });
   const unsupported = createReactNativePromotion({ framework: adaptOfficialRnPromotion({ grantPromotionReward: async () => undefined }) });
   await expect(unsupported.grantReward(input)).rejects.toMatchObject({ code: "UNSUPPORTED" });
-  const web = createWebPromotion({ framework: { Promotion: { grantReward: async () => undefined } } });
+  const web = createWebViewPromotion({ framework: { Promotion: { grantReward: async () => undefined } } });
   expect(await web.grantReward(input)).toEqual({ status: "unknown", reason: "invalid_response" });
 });

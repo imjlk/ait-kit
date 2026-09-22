@@ -1,6 +1,6 @@
 import { createCachedPlatformLoader, frameworkImportError, type PlatformLoader, type PlatformLoadResult } from "../platform-loader.js";
 /** Lazy platform-local import followed by capability-specific selection. */
-export function createWebPlatformLoader<T>(
+export function createWebViewPlatformLoader<T>(
   select: (module: typeof import("@apps-in-toss/web-framework")) => PlatformLoadResult<T>,
   includeErrorDetails = true
 ): PlatformLoader<T> {

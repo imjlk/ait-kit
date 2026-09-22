@@ -2,7 +2,7 @@ import { SdkError, type SdkShareUiResult } from "../index.js";
 import { readErrorCode, readErrorMessage } from "../notification/platform-contract.js";
 
 /**
- * Internal platform contract for the share adapter, shared by /rn and /web.
+ * Internal platform contract for the share adapter, shared by /rn and /webview.
  */
 
 export interface ShareCreateLinkParams {

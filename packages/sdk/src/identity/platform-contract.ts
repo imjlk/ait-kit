@@ -2,7 +2,7 @@ import { SdkError, type SdkAnonymousKey, type SdkLoginResult } from "../index.js
 
 /**
  * Internal platform contract for the login/anonymous-identity adapters,
- * shared by /rn and /web. Each entry declares its own structural copy of
+ * shared by /rn and /webview. Each entry declares its own structural copy of
  * the official SDK surface; this module is the common engine boundary and
  * is never exported from a public subpath.
  */

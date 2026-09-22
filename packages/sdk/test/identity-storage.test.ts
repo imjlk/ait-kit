@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createReactNativeIdentity, createReactNativeStorage } from "../src/rn";
-import { createWebIdentity, createWebStorage } from "../src/web";
+import { createWebViewIdentity, createWebViewStorage } from "../src/webview";
 
 function fakeIdentityPlatform(overrides: {
   loginImpl?: () => Promise<unknown>;
@@ -137,7 +137,7 @@ describe("@ait-kit/sdk identity adapters", () => {
   });
 
   test("web identity rejects with SDK_UNAVAILABLE without the web SDK", async () => {
-    const identity = createWebIdentity({
+    const identity = createWebViewIdentity({
       framework: async () => ({ available: false, reason: "web sdk missing" })
     });
 
@@ -149,7 +149,7 @@ describe("@ait-kit/sdk identity adapters", () => {
   });
 
   test("web identity works with an injected module", async () => {
-    const identity = createWebIdentity({ framework: fakeIdentityPlatform() });
+    const identity = createWebViewIdentity({ framework: fakeIdentityPlatform() });
 
     await expect(identity.getAnonymousKey()).resolves.toEqual({ type: "HASH", hash: "hash-1" });
   });
@@ -214,14 +214,14 @@ describe("@ait-kit/sdk storage adapters", () => {
 
   test("web storage works with an injected module", async () => {
     const platform = fakeStoragePlatform();
-    const storage = createWebStorage({ framework: platform });
+    const storage = createWebViewStorage({ framework: platform });
 
     await storage.set("web-key", "v");
     expect(await storage.get("web-key")).toBe("v");
   });
 
   test("web storage rejects with SDK_UNAVAILABLE without the web SDK", async () => {
-    const storage = createWebStorage({
+    const storage = createWebViewStorage({
       framework: async () => ({ available: false, reason: "no web sdk" })
     });
 

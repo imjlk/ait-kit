@@ -2,7 +2,7 @@ import { SdkError, type SdkStorage } from "../index.js";
 
 /**
  * Internal platform contract for the storage adapters, shared by /rn and
- * /web. Keys and string values pass through verbatim — the adapter adds no
+ * /webview. Keys and string values pass through verbatim — the adapter adds no
  * namespace prefix and performs no key transformation; consumers that want
  * namespacing compose their own keys. Rejections from the underlying SDK
  * propagate to the caller so storage failures stay observable.

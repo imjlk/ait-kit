@@ -40,7 +40,7 @@ export type SdkErrorCode =
   | "INVALID_SHARE_PATH"; // a share link path was not an intoss:// deeplink
 
 // ---------------------------------------------------------------------------
-// Notification agreement / sharing contracts (adapters live in /rn, /web)
+// Notification agreement / sharing contracts (adapters live in /rn, /webview)
 // ---------------------------------------------------------------------------
 
 /** Terminal agreement outcomes delivered by the platform event. */
@@ -76,7 +76,7 @@ export type SdkShareUiResult =
   | { status: "failed"; code?: string; reason?: string };
 
 // --------------------------------------------------------------------------
-// Login / anonymous identity / storage contracts (adapters live in /rn, /web)
+// Login / anonymous identity / storage contracts (adapters live in /rn, /webview)
 // --------------------------------------------------------------------------
 
 export type SdkLoginReferrer = "DEFAULT" | "SANDBOX";
@@ -102,7 +102,7 @@ export interface SdkAnonymousKey {
   hash: string;
 }
 
-/** Minimal storage contract shared by the /rn and /web adapters. */
+/** Minimal storage contract shared by the /rn and /webview adapters. */
 export interface SdkStorage {
   /** Resolves the stored string, or null when the key has no value. */
   get(key: string): Promise<string | null>;
@@ -113,7 +113,7 @@ export interface SdkStorage {
 }
 
 // ---------------------------------------------------------------------------
-// In-app purchase contracts (runtime-neutral; adapters live in /rn and /web)
+// In-app purchase contracts (runtime-neutral; adapters live in /rn and /webview)
 // ---------------------------------------------------------------------------
 
 export type IapProductType = "CONSUMABLE" | "NON_CONSUMABLE" | "SUBSCRIPTION";
@@ -185,7 +185,7 @@ export type IapPurchaseResult =
   | { status: "unknown"; orderId?: string; subscriptionId?: string; reason?: string };
 
 // Platform purchase-order parameter shapes (structural mirrors of the
-// official Domains API, shared by the /rn and /web connectors).
+// official Domains API, shared by the /rn and /webview connectors).
 
 export interface IapGrantOrderParams {
   orderId: string;

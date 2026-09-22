@@ -1,7 +1,7 @@
 import { expect, mock, test } from "bun:test";
-import { createWebReview } from "../src/web/review.js";
+import { createWebViewReview } from "../src/webview/review.js";
 
-import { createWebPromotion } from "../src/web/promotion.js";
+import { createWebViewPromotion } from "../src/webview/promotion.js";
 
 let calls = 0;
 const request = Object.assign(function(this: unknown) {
@@ -17,15 +17,15 @@ const Promotion = { grantReward: Object.assign(async function(this: unknown, inp
 }, { isSupported: () => true }) };
 mock.module("@apps-in-toss/web-framework", () => ({ Review, Promotion }));
 
-test("Web default loader calls the official object API", async () => {
-  const review = createWebReview();
+test("WebView default loader calls the official object API", async () => {
+  const review = createWebViewReview();
   expect(await review.isSupported()).toBe(true);
   await expect(review.request()).resolves.toBeUndefined();
   expect(calls).toBe(1);
 });
 
-test("Web promotion default loader uses the namespaced API", async () => {
-  const promotion = createWebPromotion();
+test("WebView promotion default loader uses the namespaced API", async () => {
+  const promotion = createWebViewPromotion();
   expect(await promotion.getSupport()).toBe("supported");
   expect(await promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 })).toEqual({ status: "granted", rewardKey: "web-reward" });
 });

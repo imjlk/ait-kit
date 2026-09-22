@@ -23,6 +23,8 @@ and POST fallback routes require the `TOSS_HTTP_BEARER_TOKEN` secret.
 
 ## Packages
 
+- `@ait-kit/sdk`: frontend adapters with separate React Native (`/rn`) and WebView (`/webview`) entry points.
+
 - `@ait-kit/api-core`: runtime-neutral Toss API core, request/response
   normalization, and the low-level `MtlsClient` port.
 - `@ait-kit/api-client`: HTTP client helpers for backends that call a Toss
@@ -49,6 +51,7 @@ bun run check
 
 Public npm packages are managed by Sampo:
 
+- `@ait-kit/sdk` (versioned independently from the server packages)
 - `@ait-kit/api-core`
 - `@ait-kit/api-client`
 - `@ait-kit/api-orpc`
