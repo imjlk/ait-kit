@@ -74,3 +74,18 @@ test("redacted diagnostics never stringify an untrusted thrown value", () => {
   expect(frameworkImportError("synthetic-sdk", error, false)).toBe("failed to import synthetic-sdk");
   expect(frameworkImportError("synthetic-sdk", "synthetic failure", true)).toBe("failed to import synthetic-sdk: synthetic failure");
 });
+
+
+test("changing a returned envelope cannot replace the cached SDK module", async () => {
+  const original = { marker: "original" };
+  let calls = 0;
+  const loader = createCachedPlatformLoader(async () => {
+    calls++;
+    return { available: true, module: original };
+  }, () => "failed");
+  const first = await loader();
+  if (!first.available) throw new Error("expected synthetic module");
+  first.module = { marker: "replacement" };
+  expect(await loader()).toEqual({ available: true, module: original });
+  expect(calls).toBe(1);
+});

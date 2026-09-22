@@ -24,7 +24,9 @@ export function createCachedPlatformLoader<T>(
     if (cached) return { available: true, module: cached.module };
     try {
       const result = await load();
-      if (result.available) cached = result;
+      // Keep the cache independent from the mutable result envelope returned
+      // to callers, as the original per-adapter loaders did.
+      if (result.available) cached = { available: true, module: result.module };
       return result;
     } catch (error) {
       return { available: false, reason: errorReason(error) };
