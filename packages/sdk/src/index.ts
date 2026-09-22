@@ -3,7 +3,7 @@
  *
  * The root entry is runtime-neutral: common types and errors only, with no
  * imports of any official runtime SDK. Runtime adapters live in subpaths —
- * `@ait-kit/sdk/rn` for React Native (ads today; more domains later).
+ * `@ait-kit/sdk/rn` for React Native and `@ait-kit/sdk/webview` for WebView.
  */
 
 /** Reward payload reported by rewarded ad flows. */
@@ -33,6 +33,10 @@ export type SdkErrorCode =
   | "AD_ALREADY_SHOWING" // this ad is currently being shown
   | "AD_LOAD_FAILED" // the provider rejected the load (transient; retryable)
   | "AD_LOAD_TIMEOUT" // the load flow exceeded its deadline (retryable)
+  | "INVALID_BANNER_INPUT" // malformed ad group, target, or initialization timeout
+  | "BANNER_INIT_TIMEOUT" // initialization exceeded its deadline (retryable)
+  | "BANNER_TARGET_IN_USE" // another live handle owns this target until destroyed
+  | "BANNER_ATTACH_FAILED" // the provider rejected or failed attachment
   | "INVALID_IAP_INPUT" // malformed IAP query input
   | "INVALID_IAP_RESULT" // the SDK returned a malformed IAP query result
   | "INVALID_LOGIN_RESULT" // the SDK resolved a login result that failed validation

@@ -1143,9 +1143,11 @@ export const subscriptionQuery: (args: { params: { orderId: string } }) => Promi
 // Canary: TossAuth.isIntegrated exists in the official package but NOT in
 // @ait-kit/sdk's ambient declaration — if the ambient masked the real
 // types, this file would not compile.
-import { Notification, Promotion, Review, Share, TossAuth, User, loadFullScreenAd, showFullScreenAd } from "${WEB_PLATFORM_PACKAGE}";
+import { Notification, Promotion, Review, Share, TossAuth, User, TossAds, loadFullScreenAd, showFullScreenAd } from "${WEB_PLATFORM_PACKAGE}";
 import type { FullScreenAdSupport } from "${packedPackage.name}/webview";
 export const adsContract: FullScreenAdSupport = { loadFullScreenAd, showFullScreenAd };
+import type { WebViewBannerAdsOptions } from "${packedPackage.name}/webview";
+export const bannerContract: WebViewBannerAdsOptions = { framework: { TossAds } };
 
 export async function loginType(): Promise<{ authorizationCode: string; referrer: "DEFAULT" | "SANDBOX" }> {
   return TossAuth.login();
@@ -1310,7 +1312,7 @@ try {
 }
 `;
 
-  const webRuntime = `import { createWebViewAds } from "${packedPackage.name}/webview";
+  const webRuntime = `import { createWebViewBannerAds, createWebViewAds } from "${packedPackage.name}/webview";
 import { SdkError } from "${packedPackage.name}";
 import {
   createWebViewIdentity,
@@ -1330,6 +1332,13 @@ import {
 // "window is not defined" ReferenceErrors.
 (globalThis as { window?: unknown }).window = {
   ReactNativeWebView: null,
+  __appsInToss: { ads: {
+    initialize: Object.assign((options: { sdkVersion: string; callbacks: { onInitialized: () => void } }) => {
+      if (options.sdkVersion !== "${OFFICIAL_SDK_VERSIONS.web}") throw new Error("banner: official SDK version was not injected");
+      options.callbacks.onInitialized();
+    }, { isSupported: () => true }),
+    attachBanner: () => ({ destroy() { bannerDestroyCount++; } })
+  } },
   __appsInTossConstants: {
     isLoadFullScreenAdSupported: true,
     isShowFullScreenAdSupported: true,
@@ -1339,6 +1348,7 @@ import {
     platformOS: "android"
   }
 };
+let bannerDestroyCount = 0;
 const WEBVIEW_ERROR = "apps-in-toss 웹뷰 환경이 아니에요";
 
 // The fixture's own failure sentinel: must always escape the catch blocks
@@ -1355,6 +1365,11 @@ function expectWebviewRejection(error: unknown, label: string): void {
     throw new Error(\`\${label}: rejection did not come from the official webview assertion: \${message}\`);
   }
 }
+
+const banners = createWebViewBannerAds();
+const banner = await banners.attachBanner("SYNTHETIC", { nodeType: 1, namespaceURI: "http://www.w3.org/1999/xhtml" } as HTMLElement);
+banner.destroy(); banner.destroy();
+if (bannerDestroyCount !== 1) throw new FixtureFailure("banner: expected one owned handle cleanup");
 
 const ads = createWebViewAds({ loadTimeoutMs: 250 });
 try {

@@ -13,7 +13,7 @@ npm install @ait-kit/sdk
 |---|---|
 | `@ait-kit/sdk` (root) | Runtime-neutral shared contracts: ad + IAP types, `SdkError`. Importable anywhere — plain Node, web, React Native — with no official SDK installed. |
 | `@ait-kit/sdk/rn` | React Native adapters (full-screen ads, IAP). Requires the official `@apps-in-toss/framework`, declared as an **optional peer** and imported lazily. Never requires the web SDK. |
-| `@ait-kit/sdk/webview` | WebView adapters for purchases, identity, storage, notifications, sharing, reviews, and promotions. Requires the official `@apps-in-toss/web-framework`, declared as an **optional peer** and imported lazily. Never requires the React Native SDK. |
+| `@ait-kit/sdk/webview` | WebView adapters for ads, banners, purchases, identity, storage, notifications, sharing, reviews, and promotions. Requires the official `@apps-in-toss/web-framework`, declared as an **optional peer** and imported lazily. Never requires the React Native SDK. |
 
 The two platform entries share one internal engine but keep completely
 separate SDK connections — in JavaScript and in the shipped type
@@ -100,6 +100,7 @@ SDK initialization never grants or completes pending orders by itself.
 | Pending orders | ✅ | ✅ | recovery is consumer-driven |
 | Grant completion notify | ✅ | ✅ | sent only after server grant confirms |
 | Full-screen / rewarded ads | ✅ | ✅ | reward events only; reload after each show |
+| Banner lifecycle | ➖ | ✅ | initialize, attach, cancel, and destroy an owned handle |
 | Notification agreement | ✅ | ✅ | event-based, one template per request |
 | Share link / share sheet | ✅ | ✅ | `intoss://` paths; `completed` ≠ shared |
 | Unsupported app version | `SdkError("UNSUPPORTED")` | same | per-function `isSupported` gates |
@@ -444,3 +445,35 @@ before provider dispatch. Do not loop WebView page-one calls or treat them as a 
 Missing/unsupported capabilities throw `UNSUPPORTED`, malformed inputs throw
 `INVALID_IAP_INPUT`, and malformed pages throw `INVALID_IAP_RESULT`. Other provider
 errors propagate without automatic retries.
+
+### WebView banner ads
+
+```ts
+import { createWebViewBannerAds } from "@ait-kit/sdk/webview";
+const ads = createWebViewBannerAds();
+const controller = new AbortController();
+const banner = await ads.attachBanner("AD_GROUP_ID", "#banner", {
+  theme: "auto", tone: "grey", variant: "card", signal: controller.signal,
+  callbacks: { onNoFill: () => console.log("No banner available") }
+});
+// On unmount: controller.abort() also cancels a pending attachment.
+banner.destroy(); // idempotent; only this handle is destroyed
+```
+
+Initialization is lazy, shared within an adapter, and bounded by `initializeTimeoutMs`
+(default 15 seconds; integer milliseconds from 1 to 2,147,483,647). A failed initialization can be retried.
+An attachment resolves when the provider returns its handle; it does not claim that an
+ad rendered or earned a reward. Render/view/click/impression/failure/no-fill callbacks
+are forwarded on a microtask and suppressed after destruction. Synchronous attachment
+failure rejects with `BANNER_ATTACH_FAILED`.
+
+Each live attachment must own a distinct DOM element. SDK instances reject duplicate
+targets with `BANNER_TARGET_IN_USE` until the previous handle is destroyed. Do not mix
+raw provider attachments and adapter attachments on the same element. No global
+`TossAds.destroyAll()` call is made. Use an `AbortSignal` when the target may unmount
+while initialization is pending; the pending call rejects after initialization settles
+and never attaches to an aborted target.
+
+If provider cleanup throws, the handle still becomes locally destroyed and releases its
+target claim; the provider exception remains observable. An attachment failure combined
+with a cleanup failure rejects with an `AggregateError` retaining both errors.
