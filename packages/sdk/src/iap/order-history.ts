@@ -6,12 +6,14 @@ export async function queryOrderHistory(
   pagination: IapOrderHistoryPage["pagination"],
   params?: { key?: string | null }
 ): Promise<IapOrderHistoryPage> {
-  if (params !== undefined && (!isRecord(params) ||
-      (params.key !== undefined && params.key !== null && (typeof params.key !== "string" || !params.key.trim())))) {
-    throw new SdkError("INVALID_IAP_INPUT", "history key must be a non-empty string or null");
+  if (params !== undefined && (!isRecord(params) || Array.isArray(params))) {
+    throw new SdkError("INVALID_IAP_INPUT", "history params must be an object with an optional key");
   }
   const key = params?.key;
-  if (pagination === "first_page_only" && key != null) {
+  if (key !== undefined && key !== null && (typeof key !== "string" || !key.trim())) {
+    throw new SdkError("INVALID_IAP_INPUT", "history key must be a non-empty string or null");
+  }
+  if (pagination === "first_page_only" && key !== undefined && key !== null) {
     throw new SdkError("UNSUPPORTED", "the WebView SDK only supports the first order history page");
   }
   const platform = await load();
@@ -33,7 +35,8 @@ export async function queryOrderHistory(
   }
   if (result === undefined) throw new SdkError("UNSUPPORTED", "order history is not supported on this app version");
   if (!isRecord(result) || typeof result.hasNext !== "boolean" || !Array.isArray(result.orders) ||
-      (result.nextKey !== undefined && result.nextKey !== null && typeof result.nextKey !== "string") ||
+      (result.nextKey !== undefined && result.nextKey !== null &&
+        (typeof result.nextKey !== "string" || !result.nextKey.trim())) ||
       !result.orders.every(isOrder)) {
     throw new SdkError("INVALID_IAP_RESULT", "the provider returned malformed order history");
   }
@@ -49,6 +52,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 function isOrder(value: unknown): value is IapCompletedOrRefundedOrder {
   return isRecord(value) && typeof value.orderId === "string" && !!value.orderId.trim() &&
-    typeof value.sku === "string" && !!value.sku.trim() && typeof value.date === "string" &&
+    typeof value.sku === "string" && !!value.sku.trim() && typeof value.date === "string" && !!value.date.trim() &&
     (value.status === "COMPLETED" || value.status === "REFUNDED");
 }
