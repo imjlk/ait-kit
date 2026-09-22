@@ -33,6 +33,8 @@ export type SdkErrorCode =
   | "AD_ALREADY_SHOWING" // this ad is currently being shown
   | "AD_LOAD_FAILED" // the provider rejected the load (transient; retryable)
   | "AD_LOAD_TIMEOUT" // the load flow exceeded its deadline (retryable)
+  | "INVALID_IAP_INPUT" // malformed IAP query input
+  | "INVALID_IAP_RESULT" // the SDK returned a malformed IAP query result
   | "INVALID_LOGIN_RESULT" // the SDK resolved a login result that failed validation
   | "INVALID_ANONYMOUS_KEY" // the SDK resolved an anonymous key that failed validation
   | "INVALID_PROMOTION_INPUT" // malformed direct grant input or timeout
@@ -225,3 +227,16 @@ export class SdkError extends Error {
 export type { ReviewAdapter } from "./review/platform-contract.js";
 
 export type { PromotionAdapter, PromotionSupport, PromotionGrantInput, PromotionGrantResult } from "./promotion/platform-contract.js";
+
+/** Provider subscription state; unknown future states are preserved without inference. */
+export type IapSubscriptionStatus = "ACTIVE" | "EXPIRED" | "IN_GRACE_PERIOD" | "ON_HOLD" | "PAUSED" | "REVOKED" | (string & {});
+
+/** Provider snapshot only; server verification remains the source of entitlement decisions. */
+export interface IapSubscriptionInfo {
+  catalogId: number;
+  status: IapSubscriptionStatus;
+  expiresAt: string | null;
+  isAutoRenew: boolean;
+  gracePeriodExpiresAt: string | null;
+  isAccessible: boolean;
+}

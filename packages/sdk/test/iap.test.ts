@@ -25,6 +25,7 @@ function fakeIapPlatform() {
   const purchases: CapturedPurchase[] = [];
   const completedGrants: string[] = [];
   const platform: IapPlatformSdk = {
+    async getSubscriptionInfo() { return undefined; },
     async getProductItemList() {
       return {
         products: [

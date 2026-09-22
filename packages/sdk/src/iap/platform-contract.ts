@@ -28,6 +28,7 @@ export type IapGrantTarget = {
 type WithSupport<F> = F & { isSupported?: () => boolean };
 
 export interface IapPlatformSdk {
+  getSubscriptionInfo: WithSupport<(args: { params: { orderId: string } }) => Promise<unknown>>;
   getProductItemList: WithSupport<() => Promise<{ products: IapProduct[] }>>;
   createOneTimePurchaseOrder: WithSupport<(params: IapOneTimePurchaseParams) => () => void>;
   createSubscriptionPurchaseOrder: WithSupport<
