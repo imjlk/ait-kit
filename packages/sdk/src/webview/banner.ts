@@ -2,7 +2,7 @@ import { SdkError } from "../index.js";
 import { resolvePlatformLoader, type PlatformLoader } from "../platform-loader.js";
 import { createWebViewPlatformLoader } from "./platform-loader.js";
 import type { WebViewBannerHandle, WebViewBannerOptions, WebViewBannerPlatform, WebViewBannerCallbacks, WebViewBannerError } from "./banner-contract.js";
-export type { WebViewBannerHandle, WebViewBannerOptions, WebViewBannerEvent, WebViewBannerError, WebViewBannerCallbacks } from "./banner-contract.js";
+export type { WebViewBannerHandle, WebViewBannerOptions, WebViewBannerEvent, WebViewBannerError, WebViewBannerCallbacks, WebViewBannerPlatform } from "./banner-contract.js";
 
 export interface WebViewBannerAdsOptions {
   framework?: WebViewBannerPlatform | PlatformLoader<WebViewBannerPlatform>;
@@ -75,8 +75,16 @@ export function createWebViewBannerAds(options: WebViewBannerAdsOptions = {}): W
 
   return { initialize, async attachBanner(adGroupId, target, attachOptions = {}) {
     if (typeof adGroupId !== "string" || !adGroupId.trim()) throw new SdkError("INVALID_BANNER_INPUT", "adGroupId must be non-empty");
-    const element = typeof target === "string" ? (typeof document === "undefined" ? null : document.querySelector(target)) : target;
-    if (!element || element.nodeType !== 1) throw new SdkError("INVALID_BANNER_INPUT", "banner target must resolve to an element");
+    let element: Element | null;
+    try {
+      element = typeof target === "string" ? (typeof document === "undefined" ? null : document.querySelector(target)) : target;
+    } catch (error) {
+      throw new SdkError("INVALID_BANNER_INPUT", "banner target selector is invalid", { cause: error });
+    }
+    // Namespace validation also accepts HTML elements from another document realm.
+    if (!element || element.nodeType !== 1 || element.namespaceURI !== "http://www.w3.org/1999/xhtml") {
+      throw new SdkError("INVALID_BANNER_INPUT", "banner target must resolve to an HTML element");
+    }
     if (claimedTargets.has(element)) throw new SdkError("BANNER_TARGET_IN_USE", "destroy the existing banner before reusing its target");
     const { signal, callbacks, ...style } = attachOptions;
     throwIfAborted(signal);
@@ -85,10 +93,10 @@ export function createWebViewBannerAds(options: WebViewBannerAdsOptions = {}): W
     let providerHandle: WebViewBannerHandle | undefined;
     const handle: WebViewBannerHandle = { destroy() {
       if (destroyed) return;
-      providerHandle?.destroy();
       destroyed = true;
       signal?.removeEventListener("abort", onAbort);
-      claimedTargets.delete(element);
+      try { providerHandle?.destroy(); }
+      finally { claimedTargets.delete(element); }
     } };
     const onAbort = () => handle.destroy();
     try {
@@ -99,17 +107,22 @@ export function createWebViewBannerAds(options: WebViewBannerAdsOptions = {}): W
       if (!supported(attach)) throw new SdkError("UNSUPPORTED", "banner attachment is not supported");
       let registering = true;
       let registrationError: WebViewBannerError | undefined;
-      const forwarded: WebViewBannerCallbacks = {};
-      for (const key of ["onAdRendered", "onAdViewable", "onAdClicked", "onAdImpression", "onAdFailedToRender", "onNoFill"] as const) {
-        // Defer consumer callbacks so a synchronous provider callback cannot
-        // throw before its resource handle has been returned and captured.
-        const callback = callbacks?.[key] as ((payload: unknown) => void) | undefined;
-        const forward = (payload: unknown) => {
-          if (key === "onAdFailedToRender" && registering) registrationError = payload as WebViewBannerError;
-          if (callback) queueMicrotask(() => { if (!destroyed) callback(payload); });
-        };
-        Object.assign(forwarded, { [key]: forward });
-      }
+      // Capture the resource before invoking consumer callbacks, including
+      // callbacks the provider emits synchronously during registration.
+      const forward = <P>(callback: ((payload: P) => void) | undefined) => (payload: P) => {
+        if (callback) queueMicrotask(() => { if (!destroyed) callback(payload); });
+      };
+      const forwarded: Required<WebViewBannerCallbacks> = {
+        onAdRendered: forward(callbacks?.onAdRendered),
+        onAdViewable: forward(callbacks?.onAdViewable),
+        onAdClicked: forward(callbacks?.onAdClicked),
+        onAdImpression: forward(callbacks?.onAdImpression),
+        onNoFill: forward(callbacks?.onNoFill),
+        onAdFailedToRender: payload => {
+          if (registering) registrationError = payload;
+          forward(callbacks?.onAdFailedToRender)(payload);
+        }
+      };
       providerHandle = attach.call(api, adGroupId, element as HTMLElement, { ...style, callbacks: forwarded });
       registering = false;
       if (!providerHandle || typeof providerHandle.destroy !== "function") throw new SdkError("BANNER_ATTACH_FAILED", "provider returned no banner handle");
@@ -118,7 +131,8 @@ export function createWebViewBannerAds(options: WebViewBannerAdsOptions = {}): W
       if (signal?.aborted) { handle.destroy(); throwIfAborted(signal); }
       return handle;
     } catch (error) {
-      handle.destroy();
+      try { handle.destroy(); }
+      catch (cleanupError) { throw new AggregateError([error, cleanupError], "banner attachment and cleanup failed"); }
       throw error;
     }
   } };

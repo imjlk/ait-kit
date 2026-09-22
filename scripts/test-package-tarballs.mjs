@@ -1334,7 +1334,7 @@ import {
   ReactNativeWebView: null,
   __appsInToss: { ads: {
     initialize: Object.assign((options: { sdkVersion: string; callbacks: { onInitialized: () => void } }) => {
-      if (options.sdkVersion !== "3.4.0") throw new Error("banner: official SDK version was not injected");
+      if (options.sdkVersion !== "${OFFICIAL_SDK_VERSIONS.web}") throw new Error("banner: official SDK version was not injected");
       options.callbacks.onInitialized();
     }, { isSupported: () => true }),
     attachBanner: () => ({ destroy() { bannerDestroyCount++; } })
@@ -1367,7 +1367,7 @@ function expectWebviewRejection(error: unknown, label: string): void {
 }
 
 const banners = createWebViewBannerAds();
-const banner = await banners.attachBanner("SYNTHETIC", { nodeType: 1 } as HTMLElement);
+const banner = await banners.attachBanner("SYNTHETIC", { nodeType: 1, namespaceURI: "http://www.w3.org/1999/xhtml" } as HTMLElement);
 banner.destroy(); banner.destroy();
 if (bannerDestroyCount !== 1) throw new FixtureFailure("banner: expected one owned handle cleanup");
 

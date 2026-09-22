@@ -33,10 +33,10 @@ export type SdkErrorCode =
   | "AD_ALREADY_SHOWING" // this ad is currently being shown
   | "AD_LOAD_FAILED" // the provider rejected the load (transient; retryable)
   | "AD_LOAD_TIMEOUT" // the load flow exceeded its deadline (retryable)
-  | "INVALID_BANNER_INPUT"
-  | "BANNER_INIT_TIMEOUT"
-  | "BANNER_TARGET_IN_USE"
-  | "BANNER_ATTACH_FAILED"
+  | "INVALID_BANNER_INPUT" // malformed ad group, target, or initialization timeout
+  | "BANNER_INIT_TIMEOUT" // initialization exceeded its deadline (retryable)
+  | "BANNER_TARGET_IN_USE" // another live handle owns this target until destroyed
+  | "BANNER_ATTACH_FAILED" // the provider rejected or failed attachment
   | "INVALID_IAP_INPUT" // malformed IAP query input
   | "INVALID_IAP_RESULT" // the SDK returned a malformed IAP query result
   | "INVALID_LOGIN_RESULT" // the SDK resolved a login result that failed validation

@@ -474,3 +474,7 @@ raw provider attachments and adapter attachments on the same element. No global
 `TossAds.destroyAll()` call is made. Use an `AbortSignal` when the target may unmount
 while initialization is pending; the pending call rejects after initialization settles
 and never attaches to an aborted target.
+
+If provider cleanup throws, the handle still becomes locally destroyed and releases its
+target claim; the provider exception remains observable. An attachment failure combined
+with a cleanup failure rejects with an `AggregateError` retaining both errors.

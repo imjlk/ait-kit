@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createWebViewBannerAds } from "../src/webview";
 import type { WebViewBannerPlatform, WebViewBannerCallbacks } from "../src/webview/banner-contract.js";
 type BannerApi = NonNullable<WebViewBannerPlatform["TossAds"]>;
-const target = () => ({ nodeType: 1 }) as HTMLElement;
+const target = () => ({ nodeType: 1, namespaceURI: "http://www.w3.org/1999/xhtml" }) as HTMLElement;
 function fake() {
   let initCount = 0, attachCount = 0, destroyCount = 0;
   let callbacks: WebViewBannerCallbacks | undefined;
@@ -97,4 +97,40 @@ test("a synchronous provider cannot finish initialization past its elapsed deadl
   const ads = createWebViewBannerAds({ framework: f.framework, initializeTimeoutMs: 10 });
   await expect(ads.attachBanner("a", target())).rejects.toMatchObject({ code: "BANNER_INIT_TIMEOUT" });
   expect(f.stats().attachCount).toBe(0);
+});
+
+test("throwing destroy is called once, suppresses callbacks, and releases ownership", async () => {
+  const f = fake(), el = target(); let cleanups = 0;
+  f.framework.TossAds.attachBanner = () => ({ destroy() { cleanups++; throw new Error("cleanup"); } });
+  const ads = createWebViewBannerAds({ framework: f.framework });
+  const handle = await ads.attachBanner("a", el);
+  expect(() => handle.destroy()).toThrow("cleanup");
+  handle.destroy(); expect(cleanups).toBe(1);
+  f.framework.TossAds.attachBanner = () => ({ destroy() {} });
+  (await ads.attachBanner("a", el)).destroy();
+});
+test("failed attachment preserves both primary and cleanup failures", async () => {
+  const f = fake();
+  f.framework.TossAds.attachBanner = (_id, _target, options) => {
+    options?.callbacks?.onAdFailedToRender?.({ slotId: "", adGroupId: "a", adMetadata: {}, error: { code: 0, message: "attach" } });
+    return { destroy() { throw new Error("cleanup"); } };
+  };
+  const result = await createWebViewBannerAds({ framework: f.framework }).attachBanner("a", target()).catch(error => error);
+  expect(result).toBeInstanceOf(AggregateError);
+  expect(result.errors[0]).toMatchObject({ code: "BANNER_ATTACH_FAILED" });
+  expect(result.errors[1].message).toBe("cleanup");
+});
+test("invalid selectors and non-HTML elements fail before SDK acquisition", async () => {
+  let loaded = false;
+  const ads = createWebViewBannerAds({ framework: async () => { loaded = true; return { available: true, module: {} }; } });
+  await expect(ads.attachBanner("a", { nodeType: 1, namespaceURI: "http://www.w3.org/2000/svg" } as HTMLElement)).rejects.toMatchObject({ code: "INVALID_BANNER_INPUT" });
+  const original = Object.getOwnPropertyDescriptor(globalThis, "document");
+  try {
+    Object.defineProperty(globalThis, "document", { configurable: true, value: { querySelector() { throw new DOMException("invalid selector", "SyntaxError"); } } });
+    await expect(ads.attachBanner("a", "[")).rejects.toMatchObject({ code: "INVALID_BANNER_INPUT" });
+  } finally {
+    if (original) Object.defineProperty(globalThis, "document", original);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+  expect(loaded).toBe(false);
 });

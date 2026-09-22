@@ -29,6 +29,7 @@ export interface WebViewBannerHandle { destroy(): void; }
 type Supported<F> = F & { isSupported?: () => boolean };
 export interface WebViewBannerPlatform {
   TossAds?: {
+    /** Must tolerate repeated calls after failures/timeouts, like official idempotent initialization. */
     initialize?: Supported<(options: { callbacks?: { onInitialized?: () => void; onInitializationFailed?: (error: Error) => void } }) => void>;
     attachBanner?: Supported<(adGroupId: string, target: string | HTMLElement, options?: Omit<WebViewBannerOptions, "signal">) => WebViewBannerHandle>;
   };
