@@ -61,7 +61,7 @@
     },
     "packages/sdk": {
       "name": "@ait-kit/sdk",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "peerDependencies": {
         "@apps-in-toss/framework": ">=2.10.10",
         "@apps-in-toss/web-framework": ">=3.4.0",

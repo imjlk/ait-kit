@@ -1,5 +1,17 @@
 # @ait-kit/sdk
 
+## 0.4.0 — 2026-09-22
+
+### Minor changes
+
+- [79eb267](https://github.com/imjlk/ait-kit/commit/79eb267efb2a2a6d0a12805664a2d17b0fe5b571) Add React Native and Web review adapters with lazy SDK loading, per-call support checks, and shared in-flight requests. Completion only reports SDK call completion, never review submission or reward eligibility. Optional official SDK peer minimums remain unchanged. — Thanks @imjlk!
+- [da1e9bb](https://github.com/imjlk/ait-kit/commit/da1e9bb56ab4e41dab3b3b8ebda8f917b9ca55ac) Add explicit React Native and Web direct promotion reward adapters with input validation, tri-state support, conservative grant/rejection/unknown results and per-instance concurrent-call rejection. Optional timeouts retain the lock until actual SDK settlement. No automatic retry, server fallback, or client-side ledger verification is introduced. Existing optional official SDK peers and server APIs remain unchanged. — Thanks @imjlk!
+
+### Patch changes
+
+- [32f9d85](https://github.com/imjlk/ait-kit/commit/32f9d85474291a916b64e5d55a6cbf5120bc26f7) Consolidate internal SDK loader selection, lazy import, successful-load caching, and failed-load retry behavior across React Native and Web adapters. Preserve platform isolation, injected loaders, capability checks, and each adapter's existing diagnostic detail policy. Public APIs and optional peer requirements are unchanged. — Thanks @imjlk!
+- [0f412ad](https://github.com/imjlk/ait-kit/commit/0f412ad3a133c767223e936743d1645892d4a666) Enforce the elapsed direct-promotion deadline even when synchronous SDK work or queued microtasks delay timer callbacks. Do not start payment after loading or support checks consume the deadline, and keep late SDK outcomes unknown. In-flight locks still release only when the underlying operation settles; no automatic retry is introduced. — Thanks @imjlk!
+
 ## 0.3.0 — 2026-09-16
 
 ### Minor changes
