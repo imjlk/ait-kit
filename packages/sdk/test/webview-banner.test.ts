@@ -143,3 +143,18 @@ test("malformed provider handles retain the attachment error without synthetic c
   f.framework.TossAds.attachBanner = () => ({ destroy() {} });
   (await ads.attachBanner("a", el)).destroy();
 });
+
+test("rejects initialization budgets outside the portable timer range", () => {
+  for (const initializeTimeoutMs of [0, -1, NaN, Infinity, 0.5, 2_147_483_648, 3_000_000_000]) {
+    expect(() => createWebViewBannerAds({ initializeTimeoutMs })).toThrow(expect.objectContaining({ code: "INVALID_BANNER_INPUT" }));
+  }
+  expect(() => createWebViewBannerAds({ initializeTimeoutMs: 2_147_483_647 })).not.toThrow();
+});
+test("normalizes synchronous attachment exceptions and preserves their cause", async () => {
+  const f = fake(), el = target(), cause = new Error("provider rejected");
+  f.framework.TossAds.attachBanner = () => { throw cause; };
+  const ads = createWebViewBannerAds({ framework: f.framework });
+  await expect(ads.attachBanner("a", el)).rejects.toMatchObject({ code: "BANNER_ATTACH_FAILED", cause });
+  f.framework.TossAds.attachBanner = () => ({ destroy() {} });
+  (await ads.attachBanner("a", el)).destroy();
+});

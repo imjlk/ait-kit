@@ -6,7 +6,7 @@ export type { WebViewBannerHandle, WebViewBannerOptions, WebViewBannerEvent, Web
 
 export interface WebViewBannerAdsOptions {
   framework?: WebViewBannerPlatform | PlatformLoader<WebViewBannerPlatform>;
-  /** Overall initialization deadline including SDK import; default 15000ms. */
+  /** Overall initialization deadline including SDK import; integer 1..2147483647ms, default 15000ms. */
   initializeTimeoutMs?: number;
 }
 export interface WebViewBannerAds {
@@ -19,7 +19,9 @@ const claimedTargets = new WeakSet<object>();
 
 export function createWebViewBannerAds(options: WebViewBannerAdsOptions = {}): WebViewBannerAds {
   const timeoutMs = options.initializeTimeoutMs ?? 15_000;
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new SdkError("INVALID_BANNER_INPUT", "initializeTimeoutMs must be positive and finite");
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
+    throw new SdkError("INVALID_BANNER_INPUT", "initializeTimeoutMs must be an integer from 1 to 2147483647");
+  }
   const loader = resolvePlatformLoader(options.framework, () => createWebViewPlatformLoader(module => ({ available: true, module })));
   let initialized: WebViewBannerPlatform | undefined;
   let pending: Promise<void> | undefined;
@@ -123,7 +125,12 @@ export function createWebViewBannerAds(options: WebViewBannerAdsOptions = {}): W
           forward(callbacks?.onAdFailedToRender)(payload);
         }
       };
-      const attached = attach.call(api, adGroupId, element as HTMLElement, { ...style, callbacks: forwarded });
+      let attached: WebViewBannerHandle;
+      try {
+        attached = attach.call(api, adGroupId, element as HTMLElement, { ...style, callbacks: forwarded });
+      } catch (error) {
+        throw new SdkError("BANNER_ATTACH_FAILED", "provider threw during banner attachment", { cause: error });
+      }
       registering = false;
       if (!attached || typeof attached.destroy !== "function") throw new SdkError("BANNER_ATTACH_FAILED", "provider returned no banner handle");
       providerHandle = attached;

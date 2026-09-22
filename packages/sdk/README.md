@@ -461,7 +461,7 @@ banner.destroy(); // idempotent; only this handle is destroyed
 ```
 
 Initialization is lazy, shared within an adapter, and bounded by `initializeTimeoutMs`
-(default 15 seconds, positive finite values only). A failed initialization can be retried.
+(default 15 seconds; integer milliseconds from 1 to 2,147,483,647). A failed initialization can be retried.
 An attachment resolves when the provider returns its handle; it does not claim that an
 ad rendered or earned a reward. Render/view/click/impression/failure/no-fill callbacks
 are forwarded on a microtask and suppressed after destruction. Synchronous attachment
