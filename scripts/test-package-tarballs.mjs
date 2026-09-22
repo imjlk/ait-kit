@@ -634,6 +634,7 @@ export async function missingCapabilityCheck(): Promise<boolean> {
     }
   };
   return (
+    (await expectUnsupported(() => iap.getSubscriptionInfo("order"), "subscription info")) &&
     (await promotion.getSupport()) === "unsupported" &&
     (await expectUnsupported(() => promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 }), "promotion")) &&
     !(await review.isSupported()) &&
@@ -695,6 +696,7 @@ export async function missingCapabilityCheck(): Promise<boolean> {
     }
   };
   return (
+    (await expectUnsupported(() => iap.getSubscriptionInfo("order"), "subscription info")) &&
     (await promotion.getSupport()) === "unsupported" &&
     (await expectUnsupported(() => promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 }), "promotion")) &&
     !(await review.isSupported()) &&
@@ -1061,7 +1063,10 @@ function verifyCloudflareServiceDeclarations(packedPackage, installDir, installC
  * native layer replaced) inside CI.
  */
 function verifySdkOfficialCompatibility(packedPackage, installDir, tempDir, installCommandTimeoutMs) {
-  const rnTypes = `// Type checks against the REAL @apps-in-toss/framework@${OFFICIAL_SDK_VERSIONS.rn} declarations.
+  const rnTypes = `import { IAP as QueryIAP } from "${RN_PLATFORM_PACKAGE}";
+import type { IapSubscriptionInfo } from "${packedPackage.name}";
+export const subscriptionQuery: (args: { params: { orderId: string } }) => Promise<{ subscription: IapSubscriptionInfo } | undefined> = QueryIAP.getSubscriptionInfo;
+// Type checks against the REAL @apps-in-toss/framework@${OFFICIAL_SDK_VERSIONS.rn} declarations.
 // Canaries first: these exports exist in the official package but NOT in
 // @ait-kit/sdk's ambient declaration for it — if the ambient declaration
 // masked the real types, this file would not compile.
@@ -1127,7 +1132,10 @@ export const reviewSupportType: () => boolean = requestReview.isSupported;
 export const canary = { env, useGeolocation };
 `;
 
-  const webTypes = `// Type checks against the REAL @apps-in-toss/web-framework@${OFFICIAL_SDK_VERSIONS.web} declarations.
+  const webTypes = `import { IAP as QueryIAP } from "${WEB_PLATFORM_PACKAGE}";
+import type { IapSubscriptionInfo } from "${packedPackage.name}";
+export const subscriptionQuery: (args: { params: { orderId: string } }) => Promise<{ subscription: IapSubscriptionInfo }> = QueryIAP.getSubscriptionInfo;
+// Type checks against the REAL @apps-in-toss/web-framework@${OFFICIAL_SDK_VERSIONS.web} declarations.
 // Canary: TossAuth.isIntegrated exists in the official package but NOT in
 // @ait-kit/sdk's ambient declaration — if the ambient masked the real
 // types, this file would not compile.

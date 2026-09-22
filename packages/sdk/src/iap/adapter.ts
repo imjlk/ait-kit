@@ -3,6 +3,7 @@ import {
   type IapGrantCallback,
   type IapOneTimePurchaseParams,
   type IapProduct,
+  type IapSubscriptionInfo,
   type IapSubscriptionPurchaseParams
 } from "../index.js";
 import type {
@@ -11,6 +12,7 @@ import type {
 } from "../index.js";
 import { IapGrantCoordinator } from "./grant-coordinator.js";
 import { type IapPlatformLoader, type PartialIapPlatformSdk } from "./platform-contract.js";
+import { querySubscriptionInfo } from "./subscription-info.js";
 import { runPurchaseFlow } from "./purchase-flow.js";
 
 export interface IapAdapterOptions {
@@ -28,6 +30,8 @@ export interface IapRecoveryResult {
 }
 
 export interface IapAdapter {
+  /** Read-only provider snapshot; never grants or revokes entitlements. */
+  getSubscriptionInfo(orderId: string): Promise<{ subscription: IapSubscriptionInfo }>;
   /** Lists purchasable products (one-time and subscription together). */
   getProductItemList(): Promise<{ products: IapProduct[] }>;
   /**
@@ -85,6 +89,15 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
   };
 
   return {
+    async getSubscriptionInfo(orderId: string) {
+      if (typeof orderId !== "string" || !orderId.trim()) {
+        throw new SdkError("INVALID_IAP_INPUT", "orderId must be a non-empty string");
+      }
+      const platform = await load();
+      ensureOperation(platform.getSubscriptionInfo, "getSubscriptionInfo");
+      return querySubscriptionInfo(platform, orderId);
+    },
+
     async getProductItemList() {
       const platform = await load();
       ensureOperation(platform.getProductItemList, "getProductItemList");

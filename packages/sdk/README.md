@@ -95,6 +95,7 @@ SDK initialization never grants or completes pending orders by itself.
 | Product list | ✅ | ✅ | one-time + subscription together |
 | One-time purchase | ✅ | ✅ | grant callback contract applies |
 | Subscription purchase | ✅ | ✅ | `offerId` optional; `subscriptionId` surfaced on completion |
+| Subscription info | ✅ | ✅ | read-only provider status and access snapshot |
 | Pending orders | ✅ | ✅ | recovery is consumer-driven |
 | Grant completion notify | ✅ | ✅ | sent only after server grant confirms |
 | Full-screen / rewarded ads | ✅ | ✅ | reward events only; reload after each show |
@@ -415,3 +416,15 @@ name remains `@apps-in-toss/web-framework`.
 WebView ads use the official flat `loadFullScreenAd` and `showFullScreenAd` exports.
 Create them with `createWebViewAds()` from `@ait-kit/sdk/webview`; the same
 load/show deadlines, single-use rules, and reward-event semantics described above apply.
+
+### Subscription status queries
+
+Both IAP adapters expose `getSubscriptionInfo(orderId)` and return `{ subscription }`
+with the provider's `catalogId`, `status`, `expiresAt`, `isAutoRenew`,
+`gracePeriodExpiresAt`, and `isAccessible` fields. Future status strings are preserved;
+access is never inferred from a status string. Treat this as a provider snapshot,
+not server-side entitlement verification. The query never calls `grant` or changes entitlements.
+
+Missing capabilities, unsupported host versions, and the RN unsupported `undefined`
+response throw `SdkError("UNSUPPORTED")`. Blank IDs throw `INVALID_IAP_INPUT`;
+malformed payloads throw `INVALID_IAP_RESULT`. Other provider errors remain observable.

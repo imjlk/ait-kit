@@ -3,6 +3,7 @@ import { createWebViewReview } from "../src/webview/review.js";
 
 import { createWebViewPromotion } from "../src/webview/promotion.js";
 
+import { createWebViewIap } from "../src/webview";
 import { createWebViewAds } from "../src/webview/ads.js";
 import type { FullScreenAdSupport } from "../src/webview";
 
@@ -28,7 +29,8 @@ const Promotion = { grantReward: Object.assign(async function(this: unknown, inp
   expect(input).toEqual({ promotionCode: "SYNTHETIC", amount: 1 });
   return { key: "web-reward" };
 }, { isSupported: () => true }) };
-mock.module("@apps-in-toss/web-framework", () => ({ Review, Promotion, loadFullScreenAd, showFullScreenAd }));
+const IAP = { getSubscriptionInfo: async () => ({ subscription: { catalogId: 7, status: "EXPIRED", expiresAt: null, isAutoRenew: false, gracePeriodExpiresAt: null, isAccessible: false } }) };
+mock.module("@apps-in-toss/web-framework", () => ({ Review, Promotion, loadFullScreenAd, showFullScreenAd, IAP }));
 
 test("WebView default loader calls the official object API", async () => {
   const review = createWebViewReview();
@@ -48,4 +50,9 @@ test("WebView ads default loader selects flat exports and cleans both registrati
   await ads.loadFullScreenAd("group");
   expect(await ads.showFullScreenAd("group")).toEqual({ status: "rewarded", reward: { unitType: "COIN", unitAmount: 3 } });
   expect(adCleanups).toBe(2);
+});
+
+test("WebView IAP default loader exposes subscription queries", async () => {
+  const iap = createWebViewIap({ grant: async () => {} });
+  expect((await iap.getSubscriptionInfo("order")).subscription.status).toBe("EXPIRED");
 });
