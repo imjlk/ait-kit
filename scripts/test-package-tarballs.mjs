@@ -1270,6 +1270,7 @@ import {
 (globalThis as { window?: unknown }).window = {
   ReactNativeWebView: null,
   __appsInTossConstants: {
+    isRequestReviewSupported: true,
     tossAppVersion: "9.9.9",
     operationalEnvironment: "toss",
     platformOS: "android"
