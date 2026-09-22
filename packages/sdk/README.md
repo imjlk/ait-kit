@@ -96,6 +96,7 @@ SDK initialization never grants or completes pending orders by itself.
 | One-time purchase | ✅ | ✅ | grant callback contract applies |
 | Subscription purchase | ✅ | ✅ | `offerId` optional; `subscriptionId` surfaced on completion |
 | Subscription info | ✅ | ✅ | read-only provider status and access snapshot |
+| Completed/refunded orders | ✅ cursor | ✅ first page only | read-only; no automatic restore or refund actions |
 | Pending orders | ✅ | ✅ | recovery is consumer-driven |
 | Grant completion notify | ✅ | ✅ | sent only after server grant confirms |
 | Full-screen / rewarded ads | ✅ | ✅ | reward events only; reload after each show |
@@ -427,3 +428,19 @@ not server-side entitlement verification. The query never calls `grant` or chang
 Missing capabilities, unsupported host versions, and the RN unsupported `undefined`
 response throw `SdkError("UNSUPPORTED")`. Blank IDs throw `INVALID_IAP_INPUT`;
 malformed payloads throw `INVALID_IAP_RESULT`. Other provider errors remain observable.
+
+### Completed and refunded order history
+
+`iap.getCompletedOrRefundedOrders()` returns `{ orders, hasNext, nextKey?, pagination }`.
+Each order retains its provider `orderId`, `sku`, `status` (`COMPLETED` or `REFUNDED`),
+and `date`. This read-only query never grants goods or revokes entitlements.
+
+RN pages have `pagination: "cursor"`; pass `{ key: page.nextKey }` to explicitly
+request the next page when `hasNext` is true and a cursor is present. WebView pages
+have `pagination: "first_page_only"`: the current official WebView SDK accepts no
+cursor. `hasNext` may still be true, but passing a non-null key throws `UNSUPPORTED`
+before provider dispatch. Do not loop WebView page-one calls or treat them as a full restore.
+
+Missing/unsupported capabilities throw `UNSUPPORTED`, malformed inputs throw
+`INVALID_IAP_INPUT`, and malformed pages throw `INVALID_IAP_RESULT`. Other provider
+errors propagate without automatic retries.

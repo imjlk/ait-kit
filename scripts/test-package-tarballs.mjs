@@ -634,6 +634,7 @@ export async function missingCapabilityCheck(): Promise<boolean> {
     }
   };
   return (
+    (await expectUnsupported(() => iap.getCompletedOrRefundedOrders(), "order history")) &&
     (await expectUnsupported(() => iap.getSubscriptionInfo("order"), "subscription info")) &&
     (await promotion.getSupport()) === "unsupported" &&
     (await expectUnsupported(() => promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 }), "promotion")) &&
@@ -696,6 +697,7 @@ export async function missingCapabilityCheck(): Promise<boolean> {
     }
   };
   return (
+    (await expectUnsupported(() => iap.getCompletedOrRefundedOrders(), "order history")) &&
     (await expectUnsupported(() => iap.getSubscriptionInfo("order"), "subscription info")) &&
     (await promotion.getSupport()) === "unsupported" &&
     (await expectUnsupported(() => promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 }), "promotion")) &&
@@ -1065,6 +1067,7 @@ function verifyCloudflareServiceDeclarations(packedPackage, installDir, installC
 function verifySdkOfficialCompatibility(packedPackage, installDir, tempDir, installCommandTimeoutMs) {
   const rnTypes = `import { IAP as QueryIAP } from "${RN_PLATFORM_PACKAGE}";
 import type { IapSubscriptionInfo } from "${packedPackage.name}";
+export const historyQuery: (params?: { key?: string | null }) => Promise<unknown> = QueryIAP.getCompletedOrRefundedOrders;
 export const subscriptionQuery: (args: { params: { orderId: string } }) => Promise<{ subscription: IapSubscriptionInfo } | undefined> = QueryIAP.getSubscriptionInfo;
 // Type checks against the REAL @apps-in-toss/framework@${OFFICIAL_SDK_VERSIONS.rn} declarations.
 // Canaries first: these exports exist in the official package but NOT in
@@ -1134,6 +1137,7 @@ export const canary = { env, useGeolocation };
 
   const webTypes = `import { IAP as QueryIAP } from "${WEB_PLATFORM_PACKAGE}";
 import type { IapSubscriptionInfo } from "${packedPackage.name}";
+export const historyQuery: () => Promise<unknown> = QueryIAP.getCompletedOrRefundedOrders;
 export const subscriptionQuery: (args: { params: { orderId: string } }) => Promise<{ subscription: IapSubscriptionInfo }> = QueryIAP.getSubscriptionInfo;
 // Type checks against the REAL @apps-in-toss/web-framework@${OFFICIAL_SDK_VERSIONS.web} declarations.
 // Canary: TossAuth.isIntegrated exists in the official package but NOT in
