@@ -1,3 +1,4 @@
+import { resolvePlatformLoader } from "../platform-loader.js";
 /**
  * Web adapters for `@ait-kit/sdk`.
  *
@@ -62,11 +63,7 @@ export {
 } from "./notify-share.js";
 
 export function createWebIap(options: WebIapOptions) {
-  const loader: IapPlatformLoader = !options.framework
-    ? createDefaultWebFrameworkLoader()
-    : typeof options.framework === "function"
-      ? options.framework
-      : async () => ({ available: true, module: options.framework as PartialIapPlatformSdk });
+  const loader = resolvePlatformLoader(options.framework, createDefaultWebFrameworkLoader);
   return createIapAdapter({ ...options, loader });
 }
 

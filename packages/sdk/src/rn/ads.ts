@@ -1,3 +1,4 @@
+import { resolvePlatformLoader } from "../platform-loader.js";
 // Relative import: the package ships per-file output (no bundling), so
 // the /rn entry and the root entry share one SdkError constructor and
 // `instanceof` holds for consumers importing either entry.
@@ -321,11 +322,5 @@ function errorMessage(error: unknown) {
 }
 
 function normalizeLoader(framework: ReactNativeAdsOptions["framework"]): FrameworkLoader {
-  if (!framework) {
-    return createDefaultFrameworkLoader();
-  }
-  if (typeof framework === "function") {
-    return framework;
-  }
-  return async () => ({ available: true, module: framework });
+  return resolvePlatformLoader(framework, createDefaultFrameworkLoader);
 }

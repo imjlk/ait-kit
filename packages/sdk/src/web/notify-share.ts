@@ -1,3 +1,5 @@
+import { resolvePlatformLoader } from "../platform-loader.js";
+import { createWebPlatformLoader } from "./platform-loader.js";
 import {
   SdkError,
   type SdkNotificationAgreementResult,
@@ -113,67 +115,23 @@ export function createWebShare(options: WebShareOptions = {}): WebShare {
 function normalizeWebNotificationLoader(
   framework: WebNotificationOptions["framework"]
 ): NotificationPlatformLoader {
-  if (!framework) {
-    return createDefaultWebNotificationLoader();
-  }
-  if (typeof framework === "function") {
-    return framework;
-  }
-  return async () => ({ available: true, module: framework });
+  return resolvePlatformLoader(framework, createDefaultWebNotificationLoader);
 }
 
 function normalizeWebShareLoader(
   framework: WebShareOptions["framework"]
 ): SharePlatformLoader {
-  if (!framework) {
-    return createDefaultWebShareLoader();
-  }
-  if (typeof framework === "function") {
-    return framework;
-  }
-  return async () => ({ available: true, module: framework });
+  return resolvePlatformLoader(framework, createDefaultWebShareLoader);
 }
 
 // See createDefaultWebIdentityLoader in ./identity.ts: the web SDK already
 // matches the shared contract shapes, so no conversion or assertion is used.
 function createDefaultWebNotificationLoader(): NotificationPlatformLoader {
-  let cached: NotificationPlatformSdk | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
-    }
-    try {
-      const framework: NotificationPlatformSdk = await import("@apps-in-toss/web-framework");
-      cached = framework;
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        available: false,
-        reason: `failed to import @apps-in-toss/web-framework: ${message}`
-      };
-    }
-  };
+  return createWebPlatformLoader(module => ({ available: true, module: module }));
 }
 
 function createDefaultWebShareLoader(): SharePlatformLoader {
-  let cached: SharePlatformSdk | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
-    }
-    try {
-      const framework: SharePlatformSdk = await import("@apps-in-toss/web-framework");
-      cached = framework;
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        available: false,
-        reason: `failed to import @apps-in-toss/web-framework: ${message}`
-      };
-    }
-  };
+  return createWebPlatformLoader(module => ({ available: true, module: module }));
 }
 
 /**

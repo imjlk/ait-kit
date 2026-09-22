@@ -1,3 +1,5 @@
+import { resolvePlatformLoader } from "../platform-loader.js";
+import { createWebPlatformLoader } from "./platform-loader.js";
 import { SdkError, type SdkAnonymousKey, type SdkLoginResult, type SdkStorage } from "../index.js";
 import {
   type IdentityPlatformLoader,
@@ -88,66 +90,22 @@ export function createWebStorage(options: WebStorageOptions = {}): SdkStorage {
 function normalizeWebIdentityLoader(
   framework: WebIdentityOptions["framework"]
 ): IdentityPlatformLoader {
-  if (!framework) {
-    return createDefaultWebIdentityLoader();
-  }
-  if (typeof framework === "function") {
-    return framework;
-  }
-  return async () => ({ available: true, module: framework });
+  return resolvePlatformLoader(framework, createDefaultWebIdentityLoader);
 }
 
 function normalizeWebStorageLoader(
   framework: WebStorageOptions["framework"]
 ): StoragePlatformLoader {
-  if (!framework) {
-    return createDefaultWebStorageLoader();
-  }
-  if (typeof framework === "function") {
-    return framework;
-  }
-  return async () => ({ available: true, module: framework });
+  return resolvePlatformLoader(framework, createDefaultWebStorageLoader);
 }
 
 // The web SDK exposes the shared namespaced contract shapes directly, so
 // the default loaders consume the official module without any conversion
 // or type assertion; a failed import is never cached, successful loads are.
 function createDefaultWebIdentityLoader(): IdentityPlatformLoader {
-  let cached: IdentityPlatformSdk | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
-    }
-    try {
-      const framework: IdentityPlatformSdk = await import("@apps-in-toss/web-framework");
-      cached = framework;
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        available: false,
-        reason: `failed to import @apps-in-toss/web-framework: ${message}`
-      };
-    }
-  };
+  return createWebPlatformLoader(module => ({ available: true, module: module }));
 }
 
 function createDefaultWebStorageLoader(): StoragePlatformLoader {
-  let cached: StoragePlatformSdk | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
-    }
-    try {
-      const framework: StoragePlatformSdk = await import("@apps-in-toss/web-framework");
-      cached = framework;
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        available: false,
-        reason: `failed to import @apps-in-toss/web-framework: ${message}`
-      };
-    }
-  };
+  return createWebPlatformLoader(module => ({ available: true, module: module }));
 }
