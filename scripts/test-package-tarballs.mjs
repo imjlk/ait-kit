@@ -1163,6 +1163,7 @@ function expectBridgeRejection(error: unknown, label: string): void {
   }
 }
 
+(globalThis as { __appsInToss?: unknown }).__appsInToss = { brandDisplayName: "fixture" };
 const review = createReactNativeReview();
 if (!(await review.isSupported())) throw new FixtureFailure("review: expected support");
 try {
