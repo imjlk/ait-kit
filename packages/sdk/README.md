@@ -323,3 +323,81 @@ Official reference: [Review.request](https://developers-apps-in-toss.toss.im/doc
 (Android/iOS Toss 5.253.0+, checked by the SDK). Verified package surfaces:
 RN 2.10.10 and Web 3.4.0. Device UI behavior requires separate manual verification;
 unit/tarball tests use injected SDKs or a stubbed native bridge.
+
+## Explicit direct promotion rewards
+
+```ts
+import { createReactNativePromotion } from "@ait-kit/sdk/rn";
+// Web: import { createWebPromotion } from "@ait-kit/sdk/web";
+const promotion = createReactNativePromotion({ timeoutMs: 15_000 });
+const support = await promotion.getSupport();
+// RN 2.10.10 exposes no support checker: support is "unknown", not "supported".
+// Opt into direct grants explicitly, with app-specific eligibility/budget checks.
+```
+
+`PromotionAdapter`, `PromotionSupport`, `PromotionGrantInput` and
+`PromotionGrantResult` are runtime-neutral root types. Both factories accept
+`framework` (shared `Promotion.grantReward` contract or async loader).
+RN calls `grantPromotionReward({ params: { promotionCode, amount } })`;
+Web calls only `Promotion.grantReward({ promotionCode, amount })`.
+There is no legacy Web fallback or fallback to/from server payment flows.
+
+`getSupport()` reports `unsupported` for missing functions or an explicit false
+check, `supported` for a true check, and `unknown` when a function has no checker.
+Import failures throw `SDK_UNAVAILABLE`; support-check exceptions propagate.
+Every grant rechecks support. RN's documented `undefined` and the provider's
+`UNSUPPORTED_APP_VERSION` throw `UNSUPPORTED`; malformed Web responses stay unknown.
+
+Input errors throw `INVALID_PROMOTION_INPUT` before loading/calling the SDK:
+`promotionCode` must be non-empty without surrounding whitespace (never trimmed
+into a different code), and `amount` must be a positive safe integer. Campaign
+eligibility, maximum amounts and budgets remain the consumer's responsibility.
+
+Results:
+
+- `granted` has a non-empty `rewardKey` and means only that the SDK reported success.
+- `rejected` carries an explicit documented refusal code: `4100`, `4104`, `4105`,
+  `4108`, `4109`, `4110`, `4112`, or `4114`.
+- `unknown` means confirmation is required: SDK exceptions/sentinels, malformed or
+  contradictory responses, deadlines, `UNKNOWN_ERROR`, `4113`, or new provider
+  codes. `4113` never becomes an inferred already-granted ledger state.
+
+Provider messages and raw errors are not included in grant results. Provider codes
+are retained only as bounded uppercase alphanumeric/underscore tokens; do not log
+reward keys, promotion codes or whole SDK responses.
+
+Share one adapter instance. A concurrent grant throws `PROMOTION_IN_PROGRESS`;
+completed results are never cached as idempotent payments. `timeoutMs` defaults to
+0 (disabled), accepts integers through 2147483647, and covers loading and the SDK
+call. After timeout the result is unknown, but the instance stays locked until the
+actual operation settles. A loader finishing after timeout never starts payment.
+A late success/failure cannot change the returned timeout result. There is no
+cancellation, automatic retry, or protection across instances/devices/restarts.
+
+Consumer UI pattern (all callbacks are supplied by the app):
+
+```ts
+async function grantOnce(input, ui) {
+  ui.disableGrantAction();
+  try {
+    const result = await promotion.grantReward(input);
+    if (result.status === "unknown") {
+      ui.showConfirmationRequired(); // keep disabled; never retry automatically
+      return;
+    }
+    ui.showSdkResult(result); // client report only; not a server ledger receipt
+  } catch {
+    ui.showConfirmationRequired(); // do not dump raw exceptions or auto-reenable
+  }
+}
+```
+
+Posting a client result to a server is not independent payment verification.
+Consumers requiring a server ledger must keep their existing three-stage server
+payment path. This API does not require client-side mTLS certificates/proxy tokens
+and does not replace TrailBase claims or owned-currency accounting.
+
+Official reference: [Promotion.grantReward](https://developers-apps-in-toss.toss.im/documentation/sdk/domains-api/promotion/promotion.grantreward.md).
+Contracts are checked against RN 2.10.10 and Web 3.4.0 published types/code with
+synthetic bridge fixtures. Device checks and official test-promotion calls remain
+manual; no real promotion is invoked by tests.

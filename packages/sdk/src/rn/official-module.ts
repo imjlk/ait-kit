@@ -1,3 +1,4 @@
+import type { PromotionPlatformSdk, PromotionGrantInput } from "../promotion/platform-contract.js";
 import { SdkError } from "../index.js";
 import type { IdentityPlatformSdk } from "../identity/platform-contract.js";
 import type {
@@ -42,6 +43,9 @@ type OfficialFunction<F> = F & { isSupported?: () => boolean };
 
 /** Structural subset of the official React Native framework module. */
 export interface OfficialRnFrameworkModule {
+  grantPromotionReward?: OfficialFunction<(input: { params: PromotionGrantInput }) => Promise<
+    { key: string } | { code: string } | { errorCode: string; message: string } | "ERROR" | undefined
+  >>;
   requestReview?: OfficialFunction<() => Promise<void>>;
   appLogin?: OfficialFunction<() => Promise<OfficialAppLoginResult>>;
   getAnonymousKey?: OfficialFunction<
@@ -161,4 +165,17 @@ export function adaptOfficialRnReview(module: OfficialRnFrameworkModule): import
   return typeof request === "function"
     ? { Review: { request: preserveSupport(request, () => request.call(module)) } }
     : {};
+}
+
+/** Flat RN API uses a params wrapper and undefined for unsupported app versions. */
+export function adaptOfficialRnPromotion(module: OfficialRnFrameworkModule): PromotionPlatformSdk {
+  const grant = module.grantPromotionReward;
+  if (typeof grant !== "function") return {};
+  return { Promotion: { grantReward: preserveSupport(grant, async (input: PromotionGrantInput) => {
+    const result = await grant.call(module, { params: input });
+    if (result === undefined) {
+      throw new SdkError("UNSUPPORTED", "the installed app version does not support direct promotion rewards");
+    }
+    return result;
+  }) } };
 }

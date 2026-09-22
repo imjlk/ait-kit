@@ -22,6 +22,10 @@ export function officialModule(
     (calls[name] as unknown[]).push(value);
   };
   return {
+    grantPromotionReward: overrides.grantPromotionReward ?? function(this: unknown, params) {
+      record("grantPromotionReward", { params, receiver: (this as { marker?: string })?.marker });
+      return Promise.resolve({ key: "synthetic-reward" });
+    },
     requestReview: Object.assign(overrides.requestReview ?? function(this: unknown) {
       record("requestReview", (this as { marker?: string })?.marker);
       return Promise.resolve();

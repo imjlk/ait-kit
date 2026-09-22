@@ -71,3 +71,5 @@ export function createWebIap(options: WebIapOptions) {
 }
 
 export { createWebReview, type WebReviewOptions } from "./review.js";
+
+export { createWebPromotion, type WebPromotionOptions } from "./promotion.js";
