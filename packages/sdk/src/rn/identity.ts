@@ -1,3 +1,5 @@
+import { resolvePlatformLoader } from "../platform-loader.js";
+import { createRnPlatformLoader } from "./platform-loader.js";
 import { SdkError, type SdkAnonymousKey, type SdkLoginResult } from "../index.js";
 import {
   type IdentityPlatformLoader,
@@ -42,13 +44,7 @@ export function createReactNativeIdentity(options: ReactNativeIdentityOptions = 
 export function normalizeIdentityLoader(
   framework: ReactNativeIdentityOptions["framework"]
 ): IdentityPlatformLoader {
-  if (!framework) {
-    return createDefaultRnIdentityLoader();
-  }
-  if (typeof framework === "function") {
-    return framework;
-  }
-  return async () => ({ available: true, module: framework });
+  return resolvePlatformLoader(framework, createDefaultRnIdentityLoader);
 }
 
 /**
@@ -58,17 +54,5 @@ export function normalizeIdentityLoader(
  * retries); successful loads cache the converted module.
  */
 function createDefaultRnIdentityLoader(): IdentityPlatformLoader {
-  let cached: IdentityPlatformSdk | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
-    }
-    try {
-      cached = adaptOfficialRnIdentity(await import("@apps-in-toss/framework"));
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { available: false, reason: `failed to import @apps-in-toss/framework: ${message}` };
-    }
-  };
+  return createRnPlatformLoader(module => ({ available: true, module: adaptOfficialRnIdentity(module) }));
 }

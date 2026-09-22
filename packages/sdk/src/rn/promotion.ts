@@ -1,3 +1,5 @@
+import { resolvePlatformLoader } from "../platform-loader.js";
+import { createRnPlatformLoader } from "./platform-loader.js";
 import { createPromotionAdapter } from "../promotion/adapter.js";
 import type { PromotionAdapter, PromotionPlatformLoader, PromotionPlatformSdk } from "../promotion/platform-contract.js";
 import { adaptOfficialRnPromotion } from "./official-module.js";
@@ -10,20 +12,10 @@ export interface ReactNativePromotionOptions {
 }
 
 export function createReactNativePromotion(options: ReactNativePromotionOptions = {}): PromotionAdapter {
-  return createPromotionAdapter(normalizeLoader(options.framework), options.timeoutMs);
+  return createPromotionAdapter(resolvePlatformLoader(options.framework, createDefaultPromotionLoader), options.timeoutMs);
 }
 
-function normalizeLoader(framework: ReactNativePromotionOptions["framework"]): PromotionPlatformLoader {
-  if (typeof framework === "function") return framework;
-  if (framework) return async () => ({ available: true, module: framework });
-  let cached: PromotionPlatformSdk | undefined;
-  return async () => {
-    if (cached) return { available: true, module: cached };
-    try {
-      cached = adaptOfficialRnPromotion(await import("@apps-in-toss/framework"));
-      return { available: true, module: cached };
-    } catch {
-      return { available: false, reason: "failed to import @apps-in-toss/framework" };
-    }
-  };
+/** Keep import diagnostics redacted for direct-promotion operations. */
+function createDefaultPromotionLoader(): PromotionPlatformLoader {
+  return createRnPlatformLoader(module => ({ available: true, module: adaptOfficialRnPromotion(module) }), false);
 }

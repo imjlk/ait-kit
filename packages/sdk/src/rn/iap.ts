@@ -1,3 +1,5 @@
+import { resolvePlatformLoader } from "../platform-loader.js";
+import { createRnPlatformLoader } from "./platform-loader.js";
 import { createIapAdapter, type IapAdapterOptions, type IapRecoveryResult } from "../iap/adapter.js";
 import type { IapPlatformLoader, PartialIapPlatformSdk } from "../iap/platform-contract.js";
 
@@ -19,38 +21,16 @@ export type ReactNativeIap = ReturnType<typeof createReactNativeIap>;
 export type { IapRecoveryResult };
 
 export function createReactNativeIap(options: ReactNativeIapOptions) {
-  const loader: IapPlatformLoader = !options.framework
-    ? createDefaultRnIapLoader()
-    : typeof options.framework === "function"
-      ? options.framework
-      : async () => ({ available: true, module: options.framework as PartialIapPlatformSdk });
+  const loader = resolvePlatformLoader(options.framework, createDefaultRnIapLoader);
   return createIapAdapter({ ...options, loader });
 }
 
 function createDefaultRnIapLoader(): IapPlatformLoader {
-  let cached: PartialIapPlatformSdk | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
+  return createRnPlatformLoader((framework) => {
+    const iap = framework.IAP;
+    if (typeof iap !== "object" || iap === null) {
+      return { available: false, reason: "@apps-in-toss/framework does not expose an IAP domain" };
     }
-    try {
-      const framework = (await import("@apps-in-toss/framework")) as {
-        IAP?: PartialIapPlatformSdk;
-      };
-      const iap = framework.IAP;
-      if (typeof iap !== "object" || iap === null) {
-        return {
-          available: false,
-          reason: "@apps-in-toss/framework does not expose an IAP domain"
-        };
-      }
-      // Per-operation capability is validated at each call site: an
-      // installed version may expose some IAP functions but not others.
-      cached = iap;
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { available: false, reason: `failed to import @apps-in-toss/framework: ${message}` };
-    }
-  };
+    return { available: true, module: iap };
+  });
 }

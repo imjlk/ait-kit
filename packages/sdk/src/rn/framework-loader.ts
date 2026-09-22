@@ -1,3 +1,4 @@
+import { createRnPlatformLoader } from "./platform-loader.js";
 import type { FullScreenAdSupport } from "./framework-contract.js";
 
 /**
@@ -18,21 +19,10 @@ export type FrameworkLoader = () => Promise<FrameworkLoadResult>;
  * successful loads are cached.
  */
 export function createDefaultFrameworkLoader(): FrameworkLoader {
-  let cached: FullScreenAdSupport | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
+  return createRnPlatformLoader((module) => {
+    if (typeof module.loadFullScreenAd !== "function" || typeof module.showFullScreenAd !== "function") {
+      return { available: false, reason: "@apps-in-toss/framework does not expose the Ads APIs" };
     }
-    try {
-      const module = (await import("@apps-in-toss/framework")) as Partial<FullScreenAdSupport>;
-      if (typeof module.loadFullScreenAd !== "function" || typeof module.showFullScreenAd !== "function") {
-        return { available: false, reason: "@apps-in-toss/framework does not expose the Ads APIs" };
-      }
-      cached = module as FullScreenAdSupport;
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { available: false, reason: `failed to import @apps-in-toss/framework: ${message}` };
-    }
-  };
+    return { available: true, module: module as FullScreenAdSupport };
+  });
 }

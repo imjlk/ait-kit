@@ -1,3 +1,5 @@
+import { resolvePlatformLoader } from "../platform-loader.js";
+import { createRnPlatformLoader } from "./platform-loader.js";
 import { createReviewAdapter } from "../review/adapter.js";
 import type { ReviewAdapter, ReviewPlatformLoader, ReviewPlatformSdk } from "../review/platform-contract.js";
 import { adaptOfficialRnReview } from "./official-module.js";
@@ -8,23 +10,9 @@ export interface ReactNativeReviewOptions {
 }
 
 export function createReactNativeReview(options: ReactNativeReviewOptions = {}): ReviewAdapter {
-  const framework = options.framework;
-  return createReviewAdapter(
-    typeof framework === "function" ? framework :
-      framework ? async () => ({ available: true, module: framework }) : createDefaultReviewLoader()
-  );
+  return createReviewAdapter(resolvePlatformLoader(options.framework, createDefaultReviewLoader));
 }
 
 function createDefaultReviewLoader(): ReviewPlatformLoader {
-  let cached: ReviewPlatformSdk | undefined;
-  return async () => {
-    if (cached) return { available: true, module: cached };
-    try {
-      cached = adaptOfficialRnReview(await import("@apps-in-toss/framework"));
-      return { available: true, module: cached };
-    } catch {
-      // Never cache a failed import or expose SDK error payloads in diagnostics.
-      return { available: false, reason: "failed to import @apps-in-toss/framework" };
-    }
-  };
+  return createRnPlatformLoader(module => ({ available: true, module: adaptOfficialRnReview(module) }), false);
 }

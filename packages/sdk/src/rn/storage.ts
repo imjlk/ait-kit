@@ -1,3 +1,5 @@
+import { resolvePlatformLoader } from "../platform-loader.js";
+import { createRnPlatformLoader } from "./platform-loader.js";
 import { SdkError, type SdkStorage } from "../index.js";
 import {
   createSdkStorageFromPlatform,
@@ -56,30 +58,9 @@ export function createReactNativeStorage(
 export function normalizeStorageLoader(
   framework: ReactNativeStorageOptions["framework"]
 ): StoragePlatformLoader {
-  if (!framework) {
-    return createDefaultRnStorageLoader();
-  }
-  if (typeof framework === "function") {
-    return framework;
-  }
-  return async () => ({ available: true, module: framework });
+  return resolvePlatformLoader(framework, createDefaultRnStorageLoader);
 }
 
 function createDefaultRnStorageLoader(): StoragePlatformLoader {
-  let cached: StoragePlatformSdk | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
-    }
-    try {
-      // The official RN SDK exposes Storage under the same namespaced shape
-      // as the shared contract, so no conversion is needed.
-      const framework: StoragePlatformSdk = await import("@apps-in-toss/framework");
-      cached = framework;
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { available: false, reason: `failed to import @apps-in-toss/framework: ${message}` };
-    }
-  };
+  return createRnPlatformLoader(module => ({ available: true, module: module }));
 }

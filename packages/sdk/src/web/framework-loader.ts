@@ -1,5 +1,5 @@
+import { createWebPlatformLoader } from "./platform-loader.js";
 import type { IapPlatformLoader } from "../iap/platform-contract.js";
-import type { WebIapFramework } from "./iap-contract.js";
 
 /**
  * Default lazy loader for the official web SDK: imports
@@ -8,27 +8,11 @@ import type { WebIapFramework } from "./iap-contract.js";
  * retries; successful loads are cached.
  */
 export function createDefaultWebFrameworkLoader(): IapPlatformLoader {
-  let cached: WebIapFramework["IAP"] | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
+  return createWebPlatformLoader((framework) => {
+    const iap = framework.IAP;
+    if (typeof iap !== "object" || iap === null) {
+      return { available: false, reason: "@apps-in-toss/web-framework does not expose an IAP domain" };
     }
-    try {
-      const framework = (await import("@apps-in-toss/web-framework")) as Partial<WebIapFramework>;
-      const iap = framework.IAP;
-      if (typeof iap !== "object" || iap === null) {
-        return {
-          available: false,
-          reason: "@apps-in-toss/web-framework does not expose an IAP domain"
-        };
-      }
-      // Per-operation capability is validated at each call site: an
-      // installed version may expose some IAP functions but not others.
-      cached = iap;
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { available: false, reason: `failed to import @apps-in-toss/web-framework: ${message}` };
-    }
-  };
+    return { available: true, module: iap };
+  });
 }

@@ -1,3 +1,5 @@
+import { resolvePlatformLoader } from "../platform-loader.js";
+import { createRnPlatformLoader } from "./platform-loader.js";
 import {
   SdkError,
   type SdkNotificationAgreementResult,
@@ -133,25 +135,13 @@ export function createReactNativeShare(
 export function normalizeNotificationLoader(
   framework: ReactNativeNotificationOptions["framework"]
 ): NotificationPlatformLoader {
-  if (!framework) {
-    return createDefaultRnNotificationLoader();
-  }
-  if (typeof framework === "function") {
-    return framework;
-  }
-  return async () => ({ available: true, module: framework });
+  return resolvePlatformLoader(framework, createDefaultRnNotificationLoader);
 }
 
 export function normalizeShareLoader(
   framework: ReactNativeShareOptions["framework"]
 ): SharePlatformLoader {
-  if (!framework) {
-    return createDefaultRnShareLoader();
-  }
-  if (typeof framework === "function") {
-    return framework;
-  }
-  return async () => ({ available: true, module: framework });
+  return resolvePlatformLoader(framework, createDefaultRnShareLoader);
 }
 
 /**
@@ -161,41 +151,11 @@ export function normalizeShareLoader(
  * never cached; successful loads cache the converted module.
  */
 function createDefaultRnNotificationLoader(): NotificationPlatformLoader {
-  let cached: NotificationPlatformSdk | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
-    }
-    try {
-      cached = adaptOfficialRnNotification(await import("@apps-in-toss/framework"));
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        available: false,
-        reason: `failed to import @apps-in-toss/framework: ${message}`
-      };
-    }
-  };
+  return createRnPlatformLoader(module => ({ available: true, module: adaptOfficialRnNotification(module) }));
 }
 
 function createDefaultRnShareLoader(): SharePlatformLoader {
-  let cached: SharePlatformSdk | undefined;
-  return async () => {
-    if (cached) {
-      return { available: true, module: cached };
-    }
-    try {
-      cached = adaptOfficialRnShare(await import("@apps-in-toss/framework"));
-      return { available: true, module: cached };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        available: false,
-        reason: `failed to import @apps-in-toss/framework: ${message}`
-      };
-    }
-  };
+  return createRnPlatformLoader(module => ({ available: true, module: adaptOfficialRnShare(module) }));
 }
 
 /**
