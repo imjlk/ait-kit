@@ -4,6 +4,7 @@ import {
   type IapOneTimePurchaseParams,
   type IapProduct,
   type IapSubscriptionInfo,
+  type IapOrderHistoryPage,
   type IapSubscriptionPurchaseParams
 } from "../index.js";
 import type {
@@ -12,10 +13,13 @@ import type {
 } from "../index.js";
 import { IapGrantCoordinator } from "./grant-coordinator.js";
 import { type IapPlatformLoader, type PartialIapPlatformSdk } from "./platform-contract.js";
+import { queryOrderHistory } from "./order-history.js";
 import { querySubscriptionInfo } from "./subscription-info.js";
 import { runPurchaseFlow } from "./purchase-flow.js";
 
 export interface IapAdapterOptions {
+  /** Provider paging capability, fixed by the runtime factory. */
+  orderHistoryPagination: "cursor" | "first_page_only";
   grant: IapGrantCallback;
   /** Loader for the platform SDK module (already normalized per entry point). */
   loader: IapPlatformLoader;
@@ -30,6 +34,8 @@ export interface IapRecoveryResult {
 }
 
 export interface IapAdapter {
+  /** Read-only history; WebView rejects non-null cursors rather than repeating page one. */
+  getCompletedOrRefundedOrders(params?: { key?: string | null }): Promise<IapOrderHistoryPage>;
   /** Read-only provider snapshot; never grants or revokes entitlements. */
   getSubscriptionInfo(orderId: string): Promise<{ subscription: IapSubscriptionInfo }>;
   /** Lists purchasable products (one-time and subscription together). */
@@ -89,6 +95,10 @@ export function createIapAdapter(options: IapAdapterOptions): IapAdapter {
   };
 
   return {
+    async getCompletedOrRefundedOrders(params?: { key?: string | null }) {
+      return queryOrderHistory(load, options.orderHistoryPagination, params);
+    },
+
     async getSubscriptionInfo(orderId: string) {
       if (typeof orderId !== "string" || !orderId.trim()) {
         throw new SdkError("INVALID_IAP_INPUT", "orderId must be a non-empty string");

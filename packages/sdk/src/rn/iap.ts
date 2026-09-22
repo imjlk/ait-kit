@@ -8,7 +8,7 @@ import type { IapPlatformLoader, PartialIapPlatformSdk } from "../iap/platform-c
  * (optional peer, imported lazily). The contract mirrors the web entry; the
  * two entries share the internal engine but never each other's SDK.
  */
-export interface ReactNativeIapOptions extends Omit<IapAdapterOptions, "loader"> {
+export interface ReactNativeIapOptions extends Omit<IapAdapterOptions, "loader" | "orderHistoryPagination"> {
   /**
    * Framework injection: pass an `IAP` module instance or a custom loader
    * (tests/consumers). Defaults to the lazy
@@ -22,7 +22,7 @@ export type { IapRecoveryResult };
 
 export function createReactNativeIap(options: ReactNativeIapOptions) {
   const loader = resolvePlatformLoader(options.framework, createDefaultRnIapLoader);
-  return createIapAdapter({ ...options, loader });
+  return createIapAdapter({ ...options, loader, orderHistoryPagination: "cursor" });
 }
 
 function createDefaultRnIapLoader(): IapPlatformLoader {

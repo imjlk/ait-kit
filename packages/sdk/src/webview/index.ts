@@ -33,7 +33,7 @@ import type { IapPlatformLoader, PartialIapPlatformSdk } from "../iap/platform-c
 import { createDefaultWebViewFrameworkLoader } from "./framework-loader.js";
 import type { WebViewIapFramework } from "./iap-contract.js";
 
-export interface WebViewIapOptions extends Omit<IapAdapterOptions, "loader"> {
+export interface WebViewIapOptions extends Omit<IapAdapterOptions, "loader" | "orderHistoryPagination"> {
   /**
    * WebView framework injection: pass an `IAP` module instance or a custom
    * loader (tests/consumers). Defaults to the lazy
@@ -64,7 +64,7 @@ export {
 
 export function createWebViewIap(options: WebViewIapOptions) {
   const loader = resolvePlatformLoader(options.framework, createDefaultWebViewFrameworkLoader);
-  return createIapAdapter({ ...options, loader });
+  return createIapAdapter({ ...options, loader, orderHistoryPagination: "first_page_only" });
 }
 
 export { createWebViewReview, type WebViewReviewOptions } from "./review.js";

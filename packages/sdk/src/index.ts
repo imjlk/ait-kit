@@ -240,3 +240,18 @@ export interface IapSubscriptionInfo {
   gracePeriodExpiresAt: string | null;
   isAccessible: boolean;
 }
+
+/** One completed purchase or refund reported by the provider. */
+export interface IapCompletedOrRefundedOrder {
+  orderId: string;
+  sku: string;
+  status: "COMPLETED" | "REFUNDED";
+  date: string;
+}
+export interface IapOrderHistoryPage {
+  orders: IapCompletedOrRefundedOrder[];
+  hasNext: boolean;
+  nextKey?: string | null;
+  /** WebView currently exposes only the first page, even when hasNext is true. */
+  pagination: "cursor" | "first_page_only";
+}
