@@ -111,6 +111,47 @@ for (const create of [createReactNativePromotion, createWebPromotion]) {
       }
     });
 
+    test("elapsed deadlines win even before timer callbacks can run", async () => {
+      const block = () => {
+        const end = performance.now() + 20;
+        while (performance.now() < end) { /* Simulate synchronous SDK initialization. */ }
+      };
+      for (const stage of ["queued", "load", "support", "grant", "load-error", "support-error", "grant-error"] as const) {
+        let calls = 0;
+        let slow = true;
+        const adapter = create({ timeoutMs: 5, framework: async () => {
+          if (slow && stage.startsWith("load")) block();
+          if (slow && stage === "load-error") throw new Error("synthetic load failure");
+          return { available: true, module: { Promotion: { grantReward: Object.assign(async () => {
+            calls++;
+            if (slow && stage.startsWith("grant")) block();
+            if (slow && stage === "grant-error") throw new Error("synthetic SDK failure");
+            return { key: "synthetic-key" };
+          }, { isSupported() {
+            if (slow && stage.startsWith("support")) block();
+            if (slow && stage === "support-error") throw new Error("synthetic support failure");
+            return true;
+          } }) } } };
+        } });
+        const pending = adapter.grantReward(input);
+        if (stage === "queued") block();
+        expect(await pending).toEqual({ status: "unknown", reason: "timeout" });
+        expect(calls).toBe(stage.startsWith("grant") ? 1 : 0);
+        // Once the underlying work settled, a separate explicit call is allowed.
+        slow = false;
+        expect(await adapter.grantReward(input)).toEqual({ status: "granted", rewardKey: "synthetic-key" });
+      }
+    });
+
+    test("a disabled deadline permits synchronous SDK work", async () => {
+      const adapter = create({ timeoutMs: 0, framework: { Promotion: { grantReward: async () => {
+        const end = performance.now() + 10;
+        while (performance.now() < end) {}
+        return { key: "synthetic-key" };
+      } } } });
+      expect(await adapter.grantReward(input)).toEqual({ status: "granted", rewardKey: "synthetic-key" });
+    });
+
     test("loading timeout never launches payment late and load failure is retryable", async () => {
       let resolve!: (value: { available: true; module: { Promotion: { grantReward: () => Promise<unknown> } } }) => void;
       let calls = 0;

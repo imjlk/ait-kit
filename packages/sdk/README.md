@@ -369,7 +369,9 @@ reward keys, promotion codes or whole SDK responses.
 Share one adapter instance. A concurrent grant throws `PROMOTION_IN_PROGRESS`;
 completed results are never cached as idempotent payments. `timeoutMs` defaults to
 0 (disabled), accepts integers through 2147483647, and covers loading and the SDK
-call. After timeout the result is unknown, but the instance stays locked until the
+call. Elapsed time is checked before dispatch and when the SDK settles, so delayed
+timer callbacks cannot start an overdue payment or turn a late result into success.
+After timeout the result is unknown, but the instance stays locked until the
 actual operation settles. A loader finishing after timeout never starts payment.
 A late success/failure cannot change the returned timeout result. There is no
 cancellation, automatic retry, or protection across instances/devices/restarts.
