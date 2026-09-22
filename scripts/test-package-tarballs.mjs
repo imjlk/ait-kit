@@ -599,6 +599,7 @@ function verifySdkPlatformIsolation(packedPackage, installDir, tempDir, installC
   createReactNativeIdentity,
   createReactNativeIap,
   createReactNativeNotification,
+  createReactNativePromotion,
   createReactNativeReview,
   createReactNativeShare,
   createReactNativeStorage
@@ -608,6 +609,7 @@ export const iap = createReactNativeIap({ grant: async () => {} });
 export const identity = createReactNativeIdentity();
 export const storage = createReactNativeStorage();
 export const notification = createReactNativeNotification();
+export const promotion = createReactNativePromotion();
 export const review = createReactNativeReview();
 export const share = createReactNativeShare();
 export async function crossEntryInstanceofCheck(): Promise<boolean> {
@@ -632,6 +634,8 @@ export async function missingCapabilityCheck(): Promise<boolean> {
     }
   };
   return (
+    (await promotion.getSupport()) === "unsupported" &&
+    (await expectUnsupported(() => promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 }), "promotion")) &&
     !(await review.isSupported()) &&
     (await expectUnsupported(() => review.request(), "review")) &&
     (await expectUnsupported(() => identity.login(), "login")) &&
@@ -658,6 +662,7 @@ if (!(await missingCapabilityCheck())) {
   createWebIap,
   createWebIdentity,
   createWebNotification,
+  createWebPromotion,
   createWebReview,
   createWebShare,
   createWebStorage
@@ -666,6 +671,7 @@ if (!(await missingCapabilityCheck())) {
 export const identity = createWebIdentity();
 export const storage = createWebStorage();
 export const notification = createWebNotification();
+export const promotion = createWebPromotion();
 export const review = createWebReview();
 export const share = createWebShare();
 export async function crossEntryInstanceofCheck(): Promise<boolean> {
@@ -687,6 +693,8 @@ export async function missingCapabilityCheck(): Promise<boolean> {
     }
   };
   return (
+    (await promotion.getSupport()) === "unsupported" &&
+    (await expectUnsupported(() => promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 }), "promotion")) &&
     !(await review.isSupported()) &&
     (await expectUnsupported(() => review.request(), "review")) &&
     (await expectUnsupported(() => identity.login(), "login")) &&
@@ -806,6 +814,17 @@ if (!unavailable) throw new Error("first import must fail observably");
 if (await review.isSupported() !== false) throw new Error("retry must load the stub's missing capability");
 `);
     run(process.execPath, ["--loader", "./retry-loader.mjs", "retry.mjs"], fixtureDir);
+    const promotionFactory = platform.subpath === "rn" ? "createReactNativePromotion" : "createWebPromotion";
+    writeFileSync(join(fixtureDir, "retry-promotion.mjs"), `
+import { ${promotionFactory} } from ${JSON.stringify(`${packedPackage.name}/${platform.subpath}`)};
+const promotion = ${promotionFactory}();
+let unavailable = false;
+try { await promotion.getSupport(); } catch (error) { unavailable = error.code === "SDK_UNAVAILABLE"; }
+if (!unavailable) throw new Error("first promotion import must fail observably");
+if (await promotion.getSupport() !== "unsupported") throw new Error("retry must load the stub");
+`);
+    run(process.execPath, ["--loader", "./retry-loader.mjs", "retry-promotion.mjs"], fixtureDir);
+
 
   }
 }
@@ -1042,6 +1061,7 @@ import {
   getTossShareLink,
   requestNotificationAgreement,
   requestReview,
+  grantPromotionReward,
   share
 } from "${RN_PLATFORM_PACKAGE}";
 
@@ -1086,6 +1106,9 @@ export const stubRequestNotificationAgreement: RequestNotificationAgreement = ()
 export const stubGetTossShareLink: GetTossShareLink = (path) => Promise.resolve(\`https://toss.im/\${path}\`);
 export const stubShare: Share = () => Promise.resolve();
 
+export const promotionType: (input: { params: { promotionCode: string; amount: number } }) => Promise<
+  { key: string } | { code: string } | { errorCode: string; message: string } | "ERROR" | undefined
+> = grantPromotionReward;
 export const reviewType: () => Promise<void> = requestReview;
 export const reviewSupportType: () => boolean = requestReview.isSupported;
 export const canary = { env, useGeolocation };
@@ -1095,7 +1118,7 @@ export const canary = { env, useGeolocation };
 // Canary: TossAuth.isIntegrated exists in the official package but NOT in
 // @ait-kit/sdk's ambient declaration — if the ambient masked the real
 // types, this file would not compile.
-import { Notification, Review, Share, TossAuth, User } from "${WEB_PLATFORM_PACKAGE}";
+import { Notification, Promotion, Review, Share, TossAuth, User } from "${WEB_PLATFORM_PACKAGE}";
 
 export async function loginType(): Promise<{ authorizationCode: string; referrer: "DEFAULT" | "SANDBOX" }> {
   return TossAuth.login();
@@ -1124,6 +1147,8 @@ export function shareType(message: string): Promise<void> {
   return Share.sendMessage({ message });
 }
 
+export const promotionType: (input: { promotionCode: string; amount: number }) => Promise<{ key: string }> = Promotion.grantReward;
+export const promotionSupportType: () => boolean = Promotion.grantReward.isSupported;
 export const reviewType: () => Promise<void> = Review.request;
 export const reviewSupportType: () => boolean = Review.request.isSupported;
 export const canary = { isIntegrated: TossAuth.isIntegrated };
@@ -1133,6 +1158,7 @@ export const canary = { isIntegrated: TossAuth.isIntegrated };
 import {
   createReactNativeIdentity,
   createReactNativeNotification,
+  createReactNativePromotion,
   createReactNativeReview,
   createReactNativeShare,
   createReactNativeStorage
@@ -1172,6 +1198,12 @@ try {
 } catch (error) {
   expectBridgeRejection(error, "review");
 }
+
+// The real RN function maps the rejected synthetic bridge call to ERROR.
+const promotion = createReactNativePromotion();
+if (await promotion.getSupport() !== "unknown") throw new FixtureFailure("RN promotion support must be unknown without a checker");
+const grant = await promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 });
+if (grant.status !== "unknown" || grant.reason !== "sdk_error") throw new FixtureFailure("RN promotion must preserve ambiguous bridge failure");
 
 // 1. Identity: the real appLogin/getAnonymousKey run and their bridge
 // rejections propagate with the marker — NOT a namespace-mismatch
@@ -1255,6 +1287,7 @@ try {
 import {
   createWebIdentity,
   createWebNotification,
+  createWebPromotion,
   createWebReview,
   createWebShare,
   createWebStorage
@@ -1293,6 +1326,10 @@ function expectWebviewRejection(error: unknown, label: string): void {
   }
 }
 
+const promotion = createWebPromotion();
+if (await promotion.getSupport() !== "supported") throw new FixtureFailure("Web promotion should support the synthetic host version");
+const grant = await promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 });
+if (grant.status !== "unknown" || grant.providerCode !== "UNKNOWN_ERROR") throw new FixtureFailure("Web promotion must preserve the SDK unknown error");
 const review = createWebReview();
 if (!(await review.isSupported())) throw new FixtureFailure("review: expected support");
 try {

@@ -54,3 +54,5 @@ export type {
 } from "./framework-contract.js";
 
 export { createReactNativeReview, type ReactNativeReviewOptions } from "./review.js";
+
+export { createReactNativePromotion, type ReactNativePromotionOptions } from "./promotion.js";

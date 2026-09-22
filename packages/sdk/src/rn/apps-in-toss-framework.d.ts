@@ -26,6 +26,7 @@ declare module "@apps-in-toss/framework" {
     OfficialRnFrameworkModule["requestNotificationAgreement"]
   >;
   export const getTossShareLink: NonNullable<OfficialRnFrameworkModule["getTossShareLink"]>;
+  export const grantPromotionReward: NonNullable<OfficialRnFrameworkModule["grantPromotionReward"]>;
   export const requestReview: NonNullable<OfficialRnFrameworkModule["requestReview"]>;
   export const share: NonNullable<OfficialRnFrameworkModule["share"]>;
 }

@@ -35,6 +35,8 @@ export type SdkErrorCode =
   | "AD_LOAD_TIMEOUT" // the load flow exceeded its deadline (retryable)
   | "INVALID_LOGIN_RESULT" // the SDK resolved a login result that failed validation
   | "INVALID_ANONYMOUS_KEY" // the SDK resolved an anonymous key that failed validation
+  | "INVALID_PROMOTION_INPUT" // malformed direct grant input or timeout
+  | "PROMOTION_IN_PROGRESS" // this instance still has an unsettled direct grant
   | "INVALID_SHARE_PATH"; // a share link path was not an intoss:// deeplink
 
 // ---------------------------------------------------------------------------
@@ -221,3 +223,5 @@ export class SdkError extends Error {
 }
 
 export type { ReviewAdapter } from "./review/platform-contract.js";
+
+export type { PromotionAdapter, PromotionSupport, PromotionGrantInput, PromotionGrantResult } from "./promotion/platform-contract.js";

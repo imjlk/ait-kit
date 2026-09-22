@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import {
+  createReactNativePromotion,
   createReactNativeReview,
   createReactNativeIdentity,
   createReactNativeNotification,
@@ -78,4 +79,12 @@ describe("RN default loaders convert the official module shape", () => {
     await expect(identity.login()).resolves.toMatchObject({ authorizationCode: "code-1" });
     expect(loads).toBe(before);
   });
+});
+
+
+test("RN promotion default loader uses the official params wrapper", async () => {
+  const promotion = createReactNativePromotion();
+  expect(await promotion.getSupport()).toBe("unknown");
+  expect(await promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 })).toEqual({ status: "granted", rewardKey: "synthetic-reward" });
+  expect(official.calls.grantPromotionReward).toEqual([{ params: { params: { promotionCode: "SYNTHETIC", amount: 1 } }, receiver: "official-module" }]);
 });
