@@ -52,3 +52,5 @@ export type {
   LoadFullScreenAdParams,
   ShowFullScreenAdParams
 } from "./framework-contract.js";
+
+export { createReactNativeReview, type ReactNativeReviewOptions } from "./review.js";

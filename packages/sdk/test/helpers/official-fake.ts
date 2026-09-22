@@ -22,6 +22,10 @@ export function officialModule(
     (calls[name] as unknown[]).push(value);
   };
   return {
+    requestReview: Object.assign(overrides.requestReview ?? function(this: unknown) {
+      record("requestReview", (this as { marker?: string })?.marker);
+      return Promise.resolve();
+    }, { isSupported: () => true }),
     marker: "official-module",
     calls,
     appLogin: Object.assign(

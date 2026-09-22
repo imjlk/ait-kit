@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import {
+  createReactNativeReview,
   createReactNativeIdentity,
   createReactNativeNotification,
   createReactNativeShare
@@ -18,6 +19,10 @@ mock.module("@apps-in-toss/framework", () => official);
 
 describe("RN default loaders convert the official module shape", () => {
   test("identity, notification, and share work through the default loader", async () => {
+    const review = createReactNativeReview();
+    expect(await review.isSupported()).toBe(true);
+    await expect(review.request()).resolves.toBeUndefined();
+    expect(official.calls.requestReview).toEqual(["official-module"]);
     const identity = createReactNativeIdentity();
     await expect(identity.login()).resolves.toEqual({
       authorizationCode: "code-1",

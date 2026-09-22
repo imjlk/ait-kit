@@ -42,6 +42,7 @@ type OfficialFunction<F> = F & { isSupported?: () => boolean };
 
 /** Structural subset of the official React Native framework module. */
 export interface OfficialRnFrameworkModule {
+  requestReview?: OfficialFunction<() => Promise<void>>;
   appLogin?: OfficialFunction<() => Promise<OfficialAppLoginResult>>;
   getAnonymousKey?: OfficialFunction<
     () => Promise<OfficialAnonymousKeyResult | "ERROR" | undefined>
@@ -152,4 +153,12 @@ export function adaptOfficialRnShare(module: OfficialRnFrameworkModule): SharePl
     };
   }
   return share;
+}
+
+/** Translate the official flat review function, preserving both receivers. */
+export function adaptOfficialRnReview(module: OfficialRnFrameworkModule): import("../review/platform-contract.js").ReviewPlatformSdk {
+  const request = module.requestReview;
+  return typeof request === "function"
+    ? { Review: { request: preserveSupport(request, () => request.call(module)) } }
+    : {};
 }

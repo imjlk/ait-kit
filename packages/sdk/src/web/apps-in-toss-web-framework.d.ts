@@ -9,6 +9,7 @@ declare module "@apps-in-toss/web-framework" {
   import type { WebIapFramework } from "./iap-contract.js";
   import type { NotificationAgreementParams } from "../notification/platform-contract.js";
 
+  export const Review: { request: (() => Promise<void>) & { isSupported: () => boolean } };
   export const IAP: WebIapFramework["IAP"];
   export const TossAuth: {
     login: () => Promise<{ authorizationCode: string; referrer: "DEFAULT" | "SANDBOX" }>;
