@@ -83,3 +83,6 @@ export { createWebIdentity, createWebStorage, type WebIdentity, type WebIdentity
 export { createWebNotification, createWebShare, type WebNotification, type WebNotificationOptions, type WebShare, type WebShareOptions } from "./notify-share.js";
 export { createWebReview, type WebReviewOptions } from "./review.js";
 export { createWebPromotion, type WebPromotionOptions } from "./promotion.js";
+
+export { createWebViewAds, type WebViewAds, type WebViewAdsOptions, type SdkAdType } from "./ads.js";
+export type { LoadFullScreenAdParams, FullScreenAdShowEvent, ShowFullScreenAdParams, FullScreenAdFunctions, FullScreenAdSupport } from "../ads/platform-contract.js";

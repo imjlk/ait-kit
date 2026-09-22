@@ -659,6 +659,7 @@ if (!(await missingCapabilityCheck())) {
       subpath: "webview",
       platformPackage: WEB_PLATFORM_PACKAGE,
       consumerImports: `import {
+  createWebViewAds,
   createWebViewIap,
   createWebViewIdentity,
   createWebViewNotification,
@@ -667,7 +668,8 @@ if (!(await missingCapabilityCheck())) {
   createWebViewShare,
   createWebViewStorage
 } from ${JSON.stringify(`${packedPackage.name}/webview`)};`,
-      consumerBody: `export const iap = createWebViewIap({ grant: async () => {} });
+      consumerBody: `export const ads = createWebViewAds();
+export const iap = createWebViewIap({ grant: async () => {} });
 export const identity = createWebViewIdentity();
 export const storage = createWebViewStorage();
 export const notification = createWebViewNotification();
@@ -1129,7 +1131,9 @@ export const canary = { env, useGeolocation };
 // Canary: TossAuth.isIntegrated exists in the official package but NOT in
 // @ait-kit/sdk's ambient declaration — if the ambient masked the real
 // types, this file would not compile.
-import { Notification, Promotion, Review, Share, TossAuth, User } from "${WEB_PLATFORM_PACKAGE}";
+import { Notification, Promotion, Review, Share, TossAuth, User, loadFullScreenAd, showFullScreenAd } from "${WEB_PLATFORM_PACKAGE}";
+import type { FullScreenAdSupport } from "${packedPackage.name}/webview";
+export const adsContract: FullScreenAdSupport = { loadFullScreenAd, showFullScreenAd };
 
 export async function loginType(): Promise<{ authorizationCode: string; referrer: "DEFAULT" | "SANDBOX" }> {
   return TossAuth.login();
@@ -1294,7 +1298,8 @@ try {
 }
 `;
 
-  const webRuntime = `import { SdkError } from "${packedPackage.name}";
+  const webRuntime = `import { createWebViewAds } from "${packedPackage.name}/webview";
+import { SdkError } from "${packedPackage.name}";
 import {
   createWebViewIdentity,
   createWebViewNotification,
@@ -1314,6 +1319,8 @@ import {
 (globalThis as { window?: unknown }).window = {
   ReactNativeWebView: null,
   __appsInTossConstants: {
+    isLoadFullScreenAdSupported: true,
+    isShowFullScreenAdSupported: true,
     isRequestReviewSupported: true,
     tossAppVersion: "9.9.9",
     operationalEnvironment: "toss",
@@ -1337,6 +1344,14 @@ function expectWebviewRejection(error: unknown, label: string): void {
   }
 }
 
+const ads = createWebViewAds({ loadTimeoutMs: 250 });
+try {
+  await ads.loadFullScreenAd("SYNTHETIC");
+  throw new FixtureFailure("ads: expected WebView rejection");
+} catch (error) {
+  if (!(error instanceof SdkError) || error.code !== "AD_LOAD_FAILED") throw error;
+  expectWebviewRejection(error.cause, "ads.load");
+}
 const promotion = createWebViewPromotion();
 if (await promotion.getSupport() !== "supported") throw new FixtureFailure("WebView promotion should support the synthetic host version");
 const grant = await promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 });

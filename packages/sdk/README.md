@@ -97,7 +97,7 @@ SDK initialization never grants or completes pending orders by itself.
 | Subscription purchase | ✅ | ✅ | `offerId` optional; `subscriptionId` surfaced on completion |
 | Pending orders | ✅ | ✅ | recovery is consumer-driven |
 | Grant completion notify | ✅ | ✅ | sent only after server grant confirms |
-| Full-screen ads | ✅ | ➖ | ads are RN-only today |
+| Full-screen / rewarded ads | ✅ | ✅ | reward events only; reload after each show |
 | Notification agreement | ✅ | ✅ | event-based, one template per request |
 | Share link / share sheet | ✅ | ✅ | `intoss://` paths; `completed` ≠ shared |
 | Unsupported app version | `SdkError("UNSUPPORTED")` | same | per-function `isSupported` gates |
@@ -202,6 +202,7 @@ Contracts:
 ```ts
 import { createReactNativeAds } from "@ait-kit/sdk/rn";
 
+// WebView: import { createWebViewAds } from "@ait-kit/sdk/webview";
 const ads = createReactNativeAds();
 await ads.loadFullScreenAd("AD_GROUP_ID"); // joins an in-flight duplicate load
 const result = await ads.showFullScreenAd("AD_GROUP_ID");
@@ -410,3 +411,7 @@ Use `@ait-kit/sdk/webview` and the `createWebView*` factories / `WebView*` types
 The legacy `@ait-kit/sdk/web` entry, `createWeb*` factories, and `Web*` types remain
 available as deprecated aliases with identical behavior. The official peer package
 name remains `@apps-in-toss/web-framework`.
+
+WebView ads use the official flat `loadFullScreenAd` and `showFullScreenAd` exports.
+Create them with `createWebViewAds()` from `@ait-kit/sdk/webview`; the same
+load/show deadlines, single-use rules, and reward-event semantics described above apply.
