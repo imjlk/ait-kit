@@ -200,7 +200,7 @@ Contracts:
   stay with the consumer. (Renamed from `closed` in 0.3.0; see Migrating.)
 - Unsupported surfaces/app versions reject with `SdkError("UNSUPPORTED")`.
 
-## React Native full-screen ads
+## React Native and WebView full-screen ads
 
 ```ts
 import { createReactNativeAds } from "@ait-kit/sdk/rn";
@@ -247,8 +247,7 @@ Behavior:
 
 The SDK provides ad behavior and outcomes. Your application owns server-side
 ad reward requests, user session checks, payout limits, and ledger updates.
-(Login/anonymous-key helpers and storage arrive in later entries, as do
-notification and sharing.)
+Identity, storage, notification, and sharing adapters are also available in both entries.
 
 ## Versioning
 

@@ -24,7 +24,7 @@ for (const [create, pagination] of [[createReactNativeIap, "cursor"], [createWeb
       }
     });
     test("rejects malformed pages without rewriting refund status", async () => {
-      for (const value of [null, {}, { orders: [], hasNext: 1 }, { orders: [{ ...orders[0], status: "FUTURE" }], hasNext: false }, { orders, hasNext: true, nextKey: 123 }]) {
+      for (const value of [null, {}, { orders: [], hasNext: 1 }, { orders: [{ ...orders[0], status: "FUTURE" }], hasNext: false }, { orders, hasNext: true, nextKey: 123 }, { orders, hasNext: true, nextKey: "" }, { orders, hasNext: true, nextKey: " " }, { orders: [{ ...orders[0], date: "" }], hasNext: false }]) {
         await expect(create({ framework: { getCompletedOrRefundedOrders: async () => value }, grant: async () => {} }).getCompletedOrRefundedOrders()).rejects.toMatchObject({ code: "INVALID_IAP_RESULT" });
       }
     });
@@ -34,7 +34,8 @@ test("RN forwards an opaque cursor with the official top-level key shape", async
   const seen: unknown[] = [];
   const iap = createReactNativeIap({ framework: { getCompletedOrRefundedOrders: async args => { seen.push(args); return { orders: [], hasNext: false, nextKey: null }; } }, grant: async () => {} });
   expect((await iap.getCompletedOrRefundedOrders({ key: "opaque" })).pagination).toBe("cursor");
-  expect(seen).toEqual([{ key: "opaque" }]);
+  await iap.getCompletedOrRefundedOrders({ key: null });
+  expect(seen).toEqual([{ key: "opaque" }, { key: null }]);
 });
 test("WebView rejects later pages before acquiring the SDK and never retries page one", async () => {
   let loads = 0;
@@ -49,4 +50,13 @@ test("provider errors propagate without automatic replay", async () => {
   const iap = createReactNativeIap({ framework: { getCompletedOrRefundedOrders: async () => { calls++; throw error; } }, grant: async () => {} });
   await expect(iap.getCompletedOrRefundedOrders()).rejects.toBe(error);
   expect(calls).toBe(1);
+});
+
+test("rejects non-object history arguments before acquiring the SDK", async () => {
+  let loaded = false;
+  const iap = createReactNativeIap({ framework: async () => { loaded = true; return { available: true, module: {} }; }, grant: async () => {} });
+  for (const value of [null, [], 7]) {
+    await expect(iap.getCompletedOrRefundedOrders(value as never)).rejects.toMatchObject({ code: "INVALID_IAP_INPUT" });
+  }
+  expect(loaded).toBe(false);
 });
