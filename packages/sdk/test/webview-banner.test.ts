@@ -134,3 +134,12 @@ test("invalid selectors and non-HTML elements fail before SDK acquisition", asyn
   }
   expect(loaded).toBe(false);
 });
+
+test("malformed provider handles retain the attachment error without synthetic cleanup errors", async () => {
+  const f = fake(), el = target();
+  f.framework.TossAds.attachBanner = () => ({}) as never;
+  const ads = createWebViewBannerAds({ framework: f.framework });
+  await expect(ads.attachBanner("a", el)).rejects.toMatchObject({ code: "BANNER_ATTACH_FAILED" });
+  f.framework.TossAds.attachBanner = () => ({ destroy() {} });
+  (await ads.attachBanner("a", el)).destroy();
+});

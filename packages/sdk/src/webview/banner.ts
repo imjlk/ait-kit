@@ -123,9 +123,10 @@ export function createWebViewBannerAds(options: WebViewBannerAdsOptions = {}): W
           forward(callbacks?.onAdFailedToRender)(payload);
         }
       };
-      providerHandle = attach.call(api, adGroupId, element as HTMLElement, { ...style, callbacks: forwarded });
+      const attached = attach.call(api, adGroupId, element as HTMLElement, { ...style, callbacks: forwarded });
       registering = false;
-      if (!providerHandle || typeof providerHandle.destroy !== "function") throw new SdkError("BANNER_ATTACH_FAILED", "provider returned no banner handle");
+      if (!attached || typeof attached.destroy !== "function") throw new SdkError("BANNER_ATTACH_FAILED", "provider returned no banner handle");
+      providerHandle = attached;
       if (registrationError) throw new SdkError("BANNER_ATTACH_FAILED", "provider rejected banner attachment", { cause: registrationError });
       signal?.addEventListener("abort", onAbort, { once: true });
       if (signal?.aborted) { handle.destroy(); throwIfAborted(signal); }
