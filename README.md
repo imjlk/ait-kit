@@ -51,6 +51,7 @@ bun run check
 
 Public npm packages are managed by Sampo:
 
+- `@ait-kit/sdk` (versioned independently from the server packages)
 - `@ait-kit/api-core`
 - `@ait-kit/api-client`
 - `@ait-kit/api-orpc`
