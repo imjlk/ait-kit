@@ -68,24 +68,40 @@ export function createPromotionAdapter(loader: PromotionPlatformLoader, timeoutM
       try { validated = validate(input); } catch (error) { return Promise.reject(error); }
       if (inFlight) return Promise.reject(new SdkError("PROMOTION_IN_PROGRESS", "a direct promotion request is still in progress"));
       inFlight = true;
+      const now = typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now.bind(performance)
+        : Date.now;
+      const startedAt = now();
       let expired = false;
+      // Timers cannot run while JS is blocked or draining microtasks. Check the
+      // elapsed budget too, using one clock source for the entire request.
+      const hasExpired = () => expired || (timeoutMs > 0 && now() - startedAt >= timeoutMs);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const work = Promise.resolve().then(async (): Promise<PromotionGrantResult> => {
+        if (hasExpired()) return unknown("timeout");
         const platform = await load();
         // A loading timeout must not launch a new payment later.
-        if (expired) return unknown("timeout");
-        if (support(platform) === "unsupported") {
+        if (hasExpired()) return unknown("timeout");
+        const availability = support(platform);
+        if (hasExpired()) return unknown("timeout");
+        if (availability === "unsupported") {
           throw new SdkError("UNSUPPORTED", "the installed SDK or app does not support direct promotion rewards");
         }
         let response: unknown;
         try {
           response = await platform.Promotion!.grantReward!(validated);
         } catch (error) {
+          if (hasExpired()) return unknown("timeout");
           // The RN conversion uses this only for the documented undefined result.
           if (error instanceof SdkError && error.code === "UNSUPPORTED") throw error;
           return normalize(error, true);
         }
+        if (hasExpired()) return unknown("timeout");
         return normalize(response, false);
+      }).catch((error: unknown) => {
+        // A delayed loader/support failure must not beat an elapsed deadline.
+        if (hasExpired()) return unknown("timeout");
+        throw error;
       }).finally(() => {
         inFlight = false;
         if (timer !== undefined) clearTimeout(timer);
