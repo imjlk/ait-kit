@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createReactNativeNotification, createReactNativeShare } from "../src/rn";
-import { createWebNotification, createWebShare } from "../src/web";
+import { createWebViewNotification, createWebViewShare } from "../src/webview";
 
 interface CapturedAgreement {
   templateCode: string;
@@ -185,7 +185,7 @@ describe("@ait-kit/sdk notification agreement", () => {
   });
 
   test("web notification rejects with SDK_UNAVAILABLE without the web SDK", async () => {
-    const notification = createWebNotification({
+    const notification = createWebViewNotification({
       framework: async () => ({ available: false, reason: "web sdk missing" })
     });
     await expect(notification.requestAgreement("TEMPLATE_1")).rejects.toMatchObject({
@@ -294,7 +294,7 @@ describe("@ait-kit/sdk share", () => {
 
   test("web share works with an injected module", async () => {
     const fake = fakeSharePlatform();
-    const share = createWebShare({ framework: fake.platform });
+    const share = createWebViewShare({ framework: fake.platform });
 
     const link = await share.createLink("intoss://app");
     expect(typeof link).toBe("string");
@@ -302,7 +302,7 @@ describe("@ait-kit/sdk share", () => {
   });
 
   test("web share rejects with SDK_UNAVAILABLE without the web SDK", async () => {
-    const share = createWebShare({
+    const share = createWebViewShare({
       framework: async () => ({ available: false, reason: "no web sdk" })
     });
     await expect(share.createLink("intoss://app")).rejects.toMatchObject({

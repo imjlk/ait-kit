@@ -6,7 +6,7 @@ import type {
   IapSubscriptionPurchaseParams
 } from "../src";
 import { createReactNativeIap } from "../src/rn";
-import { createWebIap } from "../src/web";
+import { createWebViewIap } from "../src/webview";
 import type { IapPlatformSdk } from "../src/iap/platform-contract";
 
 interface CapturedPurchase {
@@ -653,7 +653,7 @@ describe("@ait-kit/sdk IAP adapters", () => {
   });
 
   test("web adapter rejects with SDK_UNAVAILABLE when the web SDK is missing", async () => {
-    const web = createWebIap({
+    const web = createWebViewIap({
       framework: async () => ({ available: false, reason: "web sdk not installed" }),
       grant: async () => {}
     });
@@ -666,7 +666,7 @@ describe("@ait-kit/sdk IAP adapters", () => {
 
   test("web adapter works with an injected module", async () => {
     const fake = fakeIapPlatform();
-    const web = createWebIap({ framework: fake.platform, grant: async () => {} });
+    const web = createWebViewIap({ framework: fake.platform, grant: async () => {} });
 
     const { products } = await web.getProductItemList();
     expect(products[0]).toMatchObject({ sku: "SKU_COINS", type: "CONSUMABLE" });

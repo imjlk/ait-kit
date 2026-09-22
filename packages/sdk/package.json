@@ -35,8 +35,12 @@
       "import": "./dist/rn/index.js"
     },
     "./web": {
-      "types": "./dist/web/index.d.ts",
-      "import": "./dist/web/index.js"
+      "types": "./dist/webview/index.d.ts",
+      "import": "./dist/webview/index.js"
+    },
+    "./webview": {
+      "types": "./dist/webview/index.d.ts",
+      "import": "./dist/webview/index.js"
     }
   },
   "files": [

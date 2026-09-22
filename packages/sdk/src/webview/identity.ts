@@ -1,5 +1,5 @@
 import { resolvePlatformLoader } from "../platform-loader.js";
-import { createWebPlatformLoader } from "./platform-loader.js";
+import { createWebViewPlatformLoader } from "./platform-loader.js";
 import { SdkError, type SdkAnonymousKey, type SdkLoginResult, type SdkStorage } from "../index.js";
 import {
   type IdentityPlatformLoader,
@@ -13,9 +13,9 @@ import {
   type StoragePlatformSdk
 } from "../storage/platform-contract.js";
 
-export interface WebIdentityOptions {
+export interface WebViewIdentityOptions {
   /**
-   * Web framework injection: pass a module exposing TossAuth/User or a
+   * WebView framework injection: pass a module exposing TossAuth/User or a
    * custom loader (tests, dev replacements). Defaults to the lazy
    * `import("@apps-in-toss/web-framework")` loader. The default never
    * guesses the environment or substitutes a fake login.
@@ -23,15 +23,15 @@ export interface WebIdentityOptions {
   framework?: IdentityPlatformSdk | IdentityPlatformLoader;
 }
 
-export interface WebIdentity {
+export interface WebViewIdentity {
   /** Starts the platform login and validates/preserves the result. */
   login(): Promise<SdkLoginResult>;
   /** Looks up the SDK-issued anonymous key; never fabricates one. */
   getAnonymousKey(): Promise<SdkAnonymousKey>;
 }
 
-export function createWebIdentity(options: WebIdentityOptions = {}): WebIdentity {
-  const loader = normalizeWebIdentityLoader(options.framework);
+export function createWebViewIdentity(options: WebViewIdentityOptions = {}): WebViewIdentity {
+  const loader = normalizeWebViewIdentityLoader(options.framework);
   const load = async (): Promise<IdentityPlatformSdk> => {
     const result = await loader();
     if (!result.available) {
@@ -45,9 +45,9 @@ export function createWebIdentity(options: WebIdentityOptions = {}): WebIdentity
   };
 }
 
-export interface WebStorageOptions {
+export interface WebViewStorageOptions {
   /**
-   * Web framework injection: pass a module exposing Storage or a custom
+   * WebView framework injection: pass a module exposing Storage or a custom
    * loader. Defaults to the lazy `import("@apps-in-toss/web-framework")`
    * loader.
    */
@@ -55,8 +55,8 @@ export interface WebStorageOptions {
 }
 
 /** SDK-backed storage for web with the same verbatim-key contract as /rn. */
-export function createWebStorage(options: WebStorageOptions = {}): SdkStorage {
-  const loader = normalizeWebStorageLoader(options.framework);
+export function createWebViewStorage(options: WebViewStorageOptions = {}): SdkStorage {
+  const loader = normalizeWebViewStorageLoader(options.framework);
   let cached: SdkStorage | undefined;
   let resolving: Promise<SdkStorage> | undefined;
   const resolve = (): Promise<SdkStorage> => {
@@ -87,25 +87,36 @@ export function createWebStorage(options: WebStorageOptions = {}): SdkStorage {
   };
 }
 
-function normalizeWebIdentityLoader(
-  framework: WebIdentityOptions["framework"]
+function normalizeWebViewIdentityLoader(
+  framework: WebViewIdentityOptions["framework"]
 ): IdentityPlatformLoader {
-  return resolvePlatformLoader(framework, createDefaultWebIdentityLoader);
+  return resolvePlatformLoader(framework, createDefaultWebViewIdentityLoader);
 }
 
-function normalizeWebStorageLoader(
-  framework: WebStorageOptions["framework"]
+function normalizeWebViewStorageLoader(
+  framework: WebViewStorageOptions["framework"]
 ): StoragePlatformLoader {
-  return resolvePlatformLoader(framework, createDefaultWebStorageLoader);
+  return resolvePlatformLoader(framework, createDefaultWebViewStorageLoader);
 }
 
 // The web SDK exposes the shared namespaced contract shapes directly, so
 // the default loaders consume the official module without any conversion
 // or type assertion; a failed import is never cached, successful loads are.
-function createDefaultWebIdentityLoader(): IdentityPlatformLoader {
-  return createWebPlatformLoader(module => ({ available: true, module: module }));
+function createDefaultWebViewIdentityLoader(): IdentityPlatformLoader {
+  return createWebViewPlatformLoader(module => ({ available: true, module: module }));
 }
 
-function createDefaultWebStorageLoader(): StoragePlatformLoader {
-  return createWebPlatformLoader(module => ({ available: true, module: module }));
+function createDefaultWebViewStorageLoader(): StoragePlatformLoader {
+  return createWebViewPlatformLoader(module => ({ available: true, module: module }));
 }
+
+/** @deprecated Use createWebViewIdentity from @ait-kit/sdk/webview. */
+export const createWebIdentity = createWebViewIdentity;
+/** @deprecated Use createWebViewStorage from @ait-kit/sdk/webview. */
+export const createWebStorage = createWebViewStorage;
+/** @deprecated Use WebViewIdentity from @ait-kit/sdk/webview. */
+export type WebIdentity = WebViewIdentity;
+/** @deprecated Use WebViewIdentityOptions from @ait-kit/sdk/webview. */
+export type WebIdentityOptions = WebViewIdentityOptions;
+/** @deprecated Use WebViewStorageOptions from @ait-kit/sdk/webview. */
+export type WebStorageOptions = WebViewStorageOptions;

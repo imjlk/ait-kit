@@ -92,7 +92,7 @@ try {
     }
     if (manifest.name === "@ait-kit/sdk") {
       // Both platform adapters must ship their own runtime + types entries.
-      exportPaths.push("./rn", "./web");
+      exportPaths.push("./rn", "./webview", "./web");
     }
     for (const exportPath of exportPaths) {
       const importExport = manifest.exports?.[exportPath]?.import;
@@ -535,7 +535,7 @@ function run(command, args, cwd, timeoutMs = commandTimeoutMs) {
 
 /**
  * Proves the shipped dist files never reference the opposite platform's
- * official SDK: /rn files only @apps-in-toss/framework, /web files only
+ * official SDK: /rn files only @apps-in-toss/framework, /webview files only
  * @apps-in-toss/web-framework, and the runtime-neutral root files neither.
  */
 function verifySdkCrossPlatformPurity(packageDir) {
@@ -545,7 +545,7 @@ function verifySdkCrossPlatformPurity(packageDir) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const entryPath = join(dir, entry.name);
       if (entry.isDirectory()) {
-        const childZone = entry.name === "rn" || entry.name === "web" ? entry.name : zone;
+        const childZone = entry.name === "rn" || entry.name === "webview" ? entry.name : zone;
         visit(entryPath, childZone);
         continue;
       }
@@ -555,7 +555,7 @@ function verifySdkCrossPlatformPurity(packageDir) {
       const hasRn = content.includes(RN_PLATFORM_PACKAGE);
       const hasWeb = content.includes(WEB_PLATFORM_PACKAGE);
       const violations =
-        zone === "rn" ? [hasWeb && WEB_PLATFORM_PACKAGE] : zone === "web" ? [hasRn && RN_PLATFORM_PACKAGE] : [hasRn && RN_PLATFORM_PACKAGE, hasWeb && WEB_PLATFORM_PACKAGE];
+        zone === "rn" ? [hasWeb && WEB_PLATFORM_PACKAGE] : zone === "webview" ? [hasRn && RN_PLATFORM_PACKAGE] : [hasRn && RN_PLATFORM_PACKAGE, hasWeb && WEB_PLATFORM_PACKAGE];
       for (const violation of violations) {
         if (violation) offenders.push(`${relative} references ${violation}`);
       }
@@ -656,24 +656,24 @@ if (!(await missingCapabilityCheck())) {
 `
     },
     {
-      subpath: "web",
+      subpath: "webview",
       platformPackage: WEB_PLATFORM_PACKAGE,
       consumerImports: `import {
-  createWebIap,
-  createWebIdentity,
-  createWebNotification,
-  createWebPromotion,
-  createWebReview,
-  createWebShare,
-  createWebStorage
-} from ${JSON.stringify(`${packedPackage.name}/web`)};`,
-      consumerBody: `export const iap = createWebIap({ grant: async () => {} });
-export const identity = createWebIdentity();
-export const storage = createWebStorage();
-export const notification = createWebNotification();
-export const promotion = createWebPromotion();
-export const review = createWebReview();
-export const share = createWebShare();
+  createWebViewIap,
+  createWebViewIdentity,
+  createWebViewNotification,
+  createWebViewPromotion,
+  createWebViewReview,
+  createWebViewShare,
+  createWebViewStorage
+} from ${JSON.stringify(`${packedPackage.name}/webview`)};`,
+      consumerBody: `export const iap = createWebViewIap({ grant: async () => {} });
+export const identity = createWebViewIdentity();
+export const storage = createWebViewStorage();
+export const notification = createWebViewNotification();
+export const promotion = createWebViewPromotion();
+export const review = createWebViewReview();
+export const share = createWebViewShare();
 export async function crossEntryInstanceofCheck(): Promise<boolean> {
   try {
     await iap.getPendingOrders();
@@ -745,6 +745,17 @@ if (!(await missingCapabilityCheck())) {
       join(fixtureDir, "consumer.ts"),
       `import { SdkError } from ${JSON.stringify(packedPackage.name)};
 ${platform.consumerImports}
+${platform.subpath === "webview" ? `import * as legacy from "${packedPackage.name}/web";
+import * as canonical from "${packedPackage.name}/webview";
+const legacyOptions: legacy.WebIapOptions = { grant: async () => {} };
+const canonicalOptions: canonical.WebViewIapOptions = legacyOptions;
+for (const capability of ["Iap", "Identity", "Storage", "Notification", "Share", "Review", "Promotion"] as const) {
+  if (legacy[\`createWeb\${capability}\`] !== canonical[\`createWebView\${capability}\`]) {
+    throw new Error(\`Legacy Web alias differs for \${capability}\`);
+  }
+}
+export const legacyIap: legacy.WebIap = legacy.createWebIap(canonicalOptions);
+` : ""}
 ${platform.consumerBody}
 `
     );
@@ -804,7 +815,7 @@ export async function resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context);
 }
 `);
-    const reviewFactory = platform.subpath === "rn" ? "createReactNativeReview" : "createWebReview";
+    const reviewFactory = platform.subpath === "rn" ? "createReactNativeReview" : "createWebViewReview";
     writeFileSync(join(fixtureDir, "retry.mjs"), `
 import { ${reviewFactory} } from ${JSON.stringify(`${packedPackage.name}/${platform.subpath}`)};
 const review = ${reviewFactory}();
@@ -814,7 +825,7 @@ if (!unavailable) throw new Error("first import must fail observably");
 if (await review.isSupported() !== false) throw new Error("retry must load the stub's missing capability");
 `);
     run(process.execPath, ["--loader", "./retry-loader.mjs", "retry.mjs"], fixtureDir);
-    const promotionFactory = platform.subpath === "rn" ? "createReactNativePromotion" : "createWebPromotion";
+    const promotionFactory = platform.subpath === "rn" ? "createReactNativePromotion" : "createWebViewPromotion";
     writeFileSync(join(fixtureDir, "retry-promotion.mjs"), `
 import { ${promotionFactory} } from ${JSON.stringify(`${packedPackage.name}/${platform.subpath}`)};
 const promotion = ${promotionFactory}();
@@ -1285,13 +1296,13 @@ try {
 
   const webRuntime = `import { SdkError } from "${packedPackage.name}";
 import {
-  createWebIdentity,
-  createWebNotification,
-  createWebPromotion,
-  createWebReview,
-  createWebShare,
-  createWebStorage
-} from "${packedPackage.name}/web";
+  createWebViewIdentity,
+  createWebViewNotification,
+  createWebViewPromotion,
+  createWebViewReview,
+  createWebViewShare,
+  createWebViewStorage
+} from "${packedPackage.name}/webview";
 
 // Outside the Toss webview every official web SDK call throws the
 // environment assertion — proving the real module loaded and the shared
@@ -1326,11 +1337,11 @@ function expectWebviewRejection(error: unknown, label: string): void {
   }
 }
 
-const promotion = createWebPromotion();
-if (await promotion.getSupport() !== "supported") throw new FixtureFailure("Web promotion should support the synthetic host version");
+const promotion = createWebViewPromotion();
+if (await promotion.getSupport() !== "supported") throw new FixtureFailure("WebView promotion should support the synthetic host version");
 const grant = await promotion.grantReward({ promotionCode: "SYNTHETIC", amount: 1 });
-if (grant.status !== "unknown" || grant.providerCode !== "UNKNOWN_ERROR") throw new FixtureFailure("Web promotion must preserve the SDK unknown error");
-const review = createWebReview();
+if (grant.status !== "unknown" || grant.providerCode !== "UNKNOWN_ERROR") throw new FixtureFailure("WebView promotion must preserve the SDK unknown error");
+const review = createWebViewReview();
 if (!(await review.isSupported())) throw new FixtureFailure("review: expected support");
 try {
   await review.request();
@@ -1338,7 +1349,7 @@ try {
 } catch (error) {
   expectWebviewRejection(error, "review");
 }
-const identity = createWebIdentity();
+const identity = createWebViewIdentity();
 try {
   await identity.login();
   throw new FixtureFailure("login: expected the webview assertion");
@@ -1363,7 +1374,7 @@ try {
   }
 }
 
-const share = createWebShare();
+const share = createWebViewShare();
 try {
   await share.createLink("intoss://fixture");
   throw new FixtureFailure("createLink: expected the webview assertion");
@@ -1378,7 +1389,7 @@ if (sheetResult.status !== "failed" || !sheetResult.reason?.includes(WEBVIEW_ERR
 // The official Notification.requestAgreement asserts the webview during
 // registration; the event flow surfaces that as a rejection (never an
 // adapter UNSUPPORTED).
-const notification = createWebNotification({ timeoutMs: 250 });
+const notification = createWebViewNotification({ timeoutMs: 250 });
 try {
   await notification.requestAgreement("TEMPLATE_1");
   throw new FixtureFailure("requestAgreement: expected the webview assertion");
@@ -1386,7 +1397,7 @@ try {
   expectWebviewRejection(error, "requestAgreement");
 }
 
-const storage = createWebStorage();
+const storage = createWebViewStorage();
 try {
   await storage.get("fixture-key");
   throw new FixtureFailure("storage.get: expected the webview assertion");

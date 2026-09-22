@@ -27,7 +27,7 @@ export interface PurchaseFlowOptions {
 }
 
 /**
- * Shared purchase flow for the /rn and /web IAP adapters, built on the
+ * Shared purchase flow for the /rn and /webview IAP adapters, built on the
  * common event-flow base:
  *
  * - The platform's `processProductGrant` slot wraps the consumer-injected

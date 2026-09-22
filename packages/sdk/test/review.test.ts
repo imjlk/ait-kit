@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createReactNativeReview } from "../src/rn/review.js";
-import { createWebReview } from "../src/web/review.js";
+import { createWebViewReview } from "../src/webview/review.js";
 import { adaptOfficialRnReview } from "../src/rn/official-module.js";
 
-for (const create of [createReactNativeReview, createWebReview]) {
+for (const create of [createReactNativeReview, createWebViewReview]) {
   describe(create.name, () => {
     test("missing feature/checker or false support never requests", async () => {
       let calls = 0;

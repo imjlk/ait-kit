@@ -1,5 +1,5 @@
 /**
- * Internal platform contract shared by the /rn and /web IAP adapters.
+ * Internal platform contract shared by the /rn and /webview IAP adapters.
  * Each entry point declares its own structural copy of the official SDK
  * surface (they are different npm packages with identical Domains API
  * shapes); this module is the common, platform-neutral engine boundary and

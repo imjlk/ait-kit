@@ -3,7 +3,7 @@ import type { SdkNotificationAgreementResult } from "../index.js";
 
 /**
  * Internal platform contract for the notification-agreement adapter,
- * shared by /rn and /web (never exported from a public subpath).
+ * shared by /rn and /webview (never exported from a public subpath).
  */
 
 export interface NotificationAgreementParams {
