@@ -1349,8 +1349,8 @@ try {
   await ads.loadFullScreenAd("SYNTHETIC");
   throw new FixtureFailure("ads: expected WebView rejection");
 } catch (error) {
-  if (!(error instanceof SdkError) || error.code !== "AD_LOAD_FAILED") throw error;
-  expectWebviewRejection(error.cause, "ads.load");
+  // The official registration throws synchronously outside its host.
+  expectWebviewRejection(error, "ads.load");
 }
 const promotion = createWebViewPromotion();
 if (await promotion.getSupport() !== "supported") throw new FixtureFailure("WebView promotion should support the synthetic host version");
