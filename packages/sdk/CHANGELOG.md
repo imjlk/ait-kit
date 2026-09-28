@@ -1,5 +1,11 @@
 # @ait-kit/sdk
 
+## 0.5.1 — 2026-09-28
+
+### Fixed
+
+- [1797dd1](https://github.com/imjlk/ait-kit/commit/1797dd1b7756a9218f0d4741ddc5d390aec97f0e) Expose explicit react-native export conditions for SDK entry points so Metro can resolve require-style imports without consumer package patches. Keep the existing ESM targets and verify the packaged entry metadata. — Thanks @imjlk!
+
 ## 0.5.0 — 2026-09-22
 
 ### Minor changes
