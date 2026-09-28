@@ -28,18 +28,22 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "react-native": "./dist/index.js",
       "import": "./dist/index.js"
     },
     "./rn": {
       "types": "./dist/rn/index.d.ts",
+      "react-native": "./dist/rn/index.js",
       "import": "./dist/rn/index.js"
     },
     "./web": {
       "types": "./dist/webview/index.d.ts",
+      "react-native": "./dist/webview/index.js",
       "import": "./dist/webview/index.js"
     },
     "./webview": {
       "types": "./dist/webview/index.d.ts",
+      "react-native": "./dist/webview/index.js",
       "import": "./dist/webview/index.js"
     }
   },

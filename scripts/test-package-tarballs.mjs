@@ -107,6 +107,9 @@ try {
           `${result.name} must define string exports[${JSON.stringify(exportPath)}].import and .types targets`
         );
       }
+      if (manifest.name === "@ait-kit/sdk" && manifest.exports[exportPath]["react-native"] !== importExport) {
+        throw new Error(`RN export must resolve to the same shipped entry: ${exportPath}`);
+      }
       for (const exportTarget of [importExport, typesExport]) {
         if (!files.has(exportTarget.replace(/^\.\//, "")) || !existsSync(join(packageDir, exportTarget))) {
           throw new Error(`${result.name} export does not exist in its tarball: ${exportTarget}`);
