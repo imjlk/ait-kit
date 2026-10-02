@@ -1,5 +1,11 @@
 # @ait-kit/sdk
 
+## 0.6.0 — 2026-10-03
+
+### Minor changes
+
+- [019fb3c](https://github.com/imjlk/ait-kit/commit/019fb3c5c70488919035a4ffafe6e729ac408bf7) Add opt-in SDK operation diagnostics with fixed labels, bounded in-memory history and an injected sink. Arguments, results, native error messages and identity data are never included. Diagnostics preserve operation outcomes and do not add retries, cancellation, uploads or global logging hooks. — Thanks @imjlk!
+
 ## 0.5.1 — 2026-09-28
 
 ### Fixed
