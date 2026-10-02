@@ -1,8 +1,8 @@
 /** Runtime-neutral, opt-in observer. Never accepts call arguments or raw errors. */
-export const SDK_DIAGNOSTIC_OPERATIONS = [
+export const SDK_DIAGNOSTIC_OPERATIONS = Object.freeze([
   "login", "identity.lookup", "ad.load", "ad.show", "share.link", "share.open",
   "notification.agreement", "review.request", "iap.purchase", "promotion.grant",
-] as const;
+] as const);
 export type SdkDiagnosticOperation = typeof SDK_DIAGNOSTIC_OPERATIONS[number];
 export type SdkDiagnosticOutcome = "resolved" | "rejected" | "timeout" | "unsupported" | "unavailable";
 export interface SdkDiagnosticEvent {
@@ -22,7 +22,16 @@ export function createSdkDiagnostics({ enabled = false, sink, capacity = 50,
   if (!Number.isSafeInteger(capacity) || capacity < 0 || capacity > 200) throw new TypeError("Invalid diagnostic capacity");
   const events: SdkDiagnosticEvent[] = [];
   let sequence = 0;
-  const clock = () => { try { const value = now(); return Number.isFinite(value) ? value : 0; } catch { return 0; } };
+  const clock = (): number | undefined => {
+    try { const value = now(); return Number.isFinite(value) ? value : undefined; }
+    catch { return undefined; }
+  };
+  function elapsedSince(started: number | undefined): { durationMs?: number } {
+    const ended = clock();
+    if (started === undefined || ended === undefined) return {};
+    const durationMs = ended - started;
+    return Number.isFinite(durationMs) && durationMs >= 0 ? { durationMs } : {};
+  }
   function emit(event: SdkDiagnosticEvent) {
     const snapshot = Object.freeze(event);
     if (capacity > 0) { events.push(snapshot); if (events.length > capacity) events.shift(); }
@@ -38,11 +47,11 @@ export function createSdkDiagnostics({ enabled = false, sink, capacity = 50,
       try {
         const value = await action();
         emit({ schema: "ait-sdk-diagnostic-v1", operation, phase: "finish", sequence: id,
-          durationMs: Math.max(0, clock() - started), outcome: "resolved" });
+          ...elapsedSince(started), outcome: "resolved" });
         return value;
       } catch (error) {
         emit({ schema: "ait-sdk-diagnostic-v1", operation, phase: "finish", sequence: id,
-          durationMs: Math.max(0, clock() - started), outcome: failureOutcome(error) });
+          ...elapsedSince(started), outcome: failureOutcome(error) });
         throw error;
       }
     },

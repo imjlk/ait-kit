@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createSdkDiagnostics } from "../src/diagnostics.js";
+import { createSdkDiagnostics, SDK_DIAGNOSTIC_OPERATIONS } from "../src/diagnostics.js";
 
 test("disabled is silent and enabled preserves values, exceptions and receiver closures", async () => {
   const calls: unknown[] = [];
@@ -36,4 +36,39 @@ test("only fixed operation labels reach diagnostics", async () => {
   const error = { code: "AD_LOAD_TIMEOUT", message: "secret" };
   try { await recorder.run("ad.load", () => { throw error; }); } catch { /* expected */ }
   expect(recorder.snapshot().at(-1)?.outcome).toBe("timeout");
+});
+
+test("JavaScript cannot change the exported operation validation authority", async () => {
+  expect(Object.isFrozen(SDK_DIAGNOSTIC_OPERATIONS)).toBe(true);
+  expect(Reflect.set(SDK_DIAGNOSTIC_OPERATIONS, "0", "private-user-key")).toBe(false);
+  expect(Reflect.deleteProperty(SDK_DIAGNOSTIC_OPERATIONS, "0")).toBe(false);
+  expect(() => Array.prototype.push.call(SDK_DIAGNOSTIC_OPERATIONS, "private-user-key")).toThrow();
+  const recorder = createSdkDiagnostics({ enabled: true });
+  await expect(recorder.run("login", () => "original result")).resolves.toBe("original result");
+  await expect(recorder.run("private-user-key" as "login", () => 1)).rejects.toThrow();
+  expect(recorder.snapshot().every(event => event.operation === "login")).toBe(true);
+});
+
+test("one invalid clock reading omits duration without changing resolution or rejection", async () => {
+  for (const readings of [[null, 1_700_000_000_000], [12, null], [NaN, 20], [20, Infinity], [20, 12], [-Number.MAX_VALUE, Number.MAX_VALUE]]) {
+    for (const rejected of [false, true]) {
+      let index = 0;
+      const recorder = createSdkDiagnostics({ enabled: true, now: () => {
+        const value = readings[index++];
+        if (value === null) throw Error("clock unavailable");
+        return value!;
+      } });
+      const originalError = new Error("original error");
+      const action = recorder.run("login", () => { if (rejected) throw originalError; return 42; });
+      if (rejected) await expect(action).rejects.toBe(originalError);
+      else await expect(action).resolves.toBe(42);
+      const finish = recorder.snapshot().at(-1)!;
+      expect(finish.outcome).toBe(rejected ? "rejected" : "resolved");
+      expect(Object.hasOwn(finish, "durationMs")).toBe(false);
+    }
+  }
+  let time = 0;
+  const valid = createSdkDiagnostics({ enabled:true, now:() => time++ * 25 });
+  await valid.run("login", () => 42);
+  expect(valid.snapshot().at(-1)?.durationMs).toBe(25);
 });
