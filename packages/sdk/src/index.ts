@@ -259,3 +259,6 @@ export interface IapOrderHistoryPage {
   /** WebView currently exposes only the first page, even when hasNext is true. */
   pagination: "cursor" | "first_page_only";
 }
+
+export { createSdkDiagnostics, SDK_DIAGNOSTIC_OPERATIONS } from "./diagnostics.js";
+export type { SdkDiagnosticOperation, SdkDiagnosticOutcome, SdkDiagnosticEvent, SdkDiagnosticSink } from "./diagnostics.js";
