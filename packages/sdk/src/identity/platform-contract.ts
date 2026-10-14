@@ -1,4 +1,4 @@
-import { SdkError, type SdkAnonymousKey, type SdkLoginResult } from "../index.js";
+import { SdkError, type SdkAnonymousAuthCode, type SdkAnonymousKey, type SdkLoginResult } from "../index.js";
 
 /**
  * Internal platform contract for the login/anonymous-identity adapters,
@@ -12,6 +12,7 @@ export interface TossAuthLike {
 }
 
 export interface UserLike {
+  createAnonymousKeyAuthCode?: FunctionWithSupport<() => Promise<unknown>>;
   getAnonymousKey: FunctionWithSupport<() => Promise<unknown>> | undefined;
 }
 
@@ -116,4 +117,19 @@ function describe(value: unknown): string {
     return typeof type === "string" ? `{ type: ${type} }` : "an unrecognized object";
   }
   return typeof value;
+}
+
+/** SDK 3.6+ server-authentication code flow; never falls back to a client hash. */
+export async function runSdkCreateAnonymousKeyAuthCode(platform: IdentityPlatformSdk): Promise<SdkAnonymousAuthCode> {
+  const createCode = platform.User?.createAnonymousKeyAuthCode;
+  if (typeof createCode !== "function" || (typeof createCode.isSupported === "function" && !createCode.isSupported())) {
+    throw new SdkError("UNSUPPORTED", "anonymous authentication codes require a supported SDK 3.6+ runtime");
+  }
+  const result = await platform.User!.createAnonymousKeyAuthCode!();
+  const value = result && typeof result === "object" && !Array.isArray(result) ? result as Record<string, unknown> : {};
+  if (typeof value.code !== "string" || !value.code.trim() || value.code.length > 4096
+    || typeof value.expiresIn !== "number" || !Number.isSafeInteger(value.expiresIn) || value.expiresIn <= 0) {
+    throw new SdkError("INVALID_ANONYMOUS_AUTH_CODE", "SDK returned an invalid anonymous authentication code response");
+  }
+  return { code: value.code, expiresIn: value.expiresIn };
 }

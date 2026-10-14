@@ -1,9 +1,10 @@
 import { resolvePlatformLoader } from "../platform-loader.js";
 import { createWebViewPlatformLoader } from "./platform-loader.js";
-import { SdkError, type SdkAnonymousKey, type SdkLoginResult, type SdkStorage } from "../index.js";
+import { SdkError, type SdkAnonymousAuthCode, type SdkAnonymousKey, type SdkLoginResult, type SdkStorage } from "../index.js";
 import {
   type IdentityPlatformLoader,
   type IdentityPlatformSdk,
+  runSdkCreateAnonymousKeyAuthCode,
   runSdkGetAnonymousKey,
   runSdkLogin
 } from "../identity/platform-contract.js";
@@ -24,6 +25,8 @@ export interface WebViewIdentityOptions {
 }
 
 export interface WebViewIdentity {
+  /** SDK 3.6+: fresh single-use code for server authentication. */
+  createAnonymousKeyAuthCode(): Promise<SdkAnonymousAuthCode>;
   /** Starts the platform login and validates/preserves the result. */
   login(): Promise<SdkLoginResult>;
   /** Looks up the SDK-issued anonymous key; never fabricates one. */
@@ -40,6 +43,7 @@ export function createWebViewIdentity(options: WebViewIdentityOptions = {}): Web
     return result.module;
   };
   return {
+    createAnonymousKeyAuthCode: async () => runSdkCreateAnonymousKeyAuthCode(await load()),
     login: async () => runSdkLogin(await load()),
     getAnonymousKey: async () => runSdkGetAnonymousKey(await load())
   };

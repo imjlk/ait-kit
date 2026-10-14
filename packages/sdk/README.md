@@ -477,3 +477,22 @@ and never attaches to an aborted target.
 If provider cleanup throws, the handle still becomes locally destroyed and releases its
 target claim; the provider exception remains observable. An attachment failure combined
 with a cleanup failure rejects with an `AggregateError` retaining both errors.
+
+## Anonymous server authentication
+
+With official WebView SDK 3.6.0 or newer:
+
+```ts
+import { createWebViewIdentity } from "@ait-kit/sdk/webview";
+const identity = createWebViewIdentity();
+const { code } = await identity.createAnonymousKeyAuthCode();
+// Send immediately to your server; use @ait-kit/api-core exchangeAnonAuthCode there.
+```
+
+Each call asks the SDK for a fresh code; codes are not cached or stored. Missing
+methods and unsupported runtimes reject with `UNSUPPORTED`. Invalid response
+shapes reject with `INVALID_ANONYMOUS_AUTH_CODE` without echoing the code. This
+method never falls back to login or a client-provided hash. Existing APIs still
+work with their existing peer versions; only this method requires SDK 3.6+.
+
+Official contract: https://developers-apps-in-toss.toss.im/documentation/sdk/domains-api/user/user.createanonymouskeyauthcode.md

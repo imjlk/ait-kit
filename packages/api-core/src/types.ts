@@ -12,6 +12,7 @@ export const TOSS_ENDPOINTS = Object.freeze({
   promotionExecute: "/api-partner/v1/apps-in-toss/promotion/execute-promotion",
   promotionResult: "/api-partner/v1/apps-in-toss/promotion/execution-result",
   iapOrderStatus: "/api-partner/v1/apps-in-toss/order/get-order-status",
+  anonAuthCodeExchange: "/api-partner/v1/apps-in-toss/users/anon-key/exchange",
   anonKeyVerify: "/api-partner/v1/apps-in-toss/users/anon-key/verify",
   messageSend: "/api-partner/v1/apps-in-toss/messenger/send-message",
   messageBulkSend: "/api-partner/v1/apps-in-toss/messenger/send-bulk-message"

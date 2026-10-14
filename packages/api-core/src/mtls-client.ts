@@ -16,6 +16,7 @@ import type {
 } from "./types.js";
 
 export interface TossMtlsRequest {
+  signal?: AbortSignal;
   method: string;
   path: string;
   headers?: Record<string, string>;
@@ -41,7 +42,8 @@ export async function requestToss(
   };
   const init: RequestInit = {
     method: request.method,
-    headers
+    headers,
+    ...(request.signal ? { signal: request.signal } : {})
   };
 
   if (request.body !== undefined) {

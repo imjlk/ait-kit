@@ -27,6 +27,7 @@ export type AdShowResult =
 
 /** Stable error codes for SDK adapter failures. */
 export type SdkErrorCode =
+  | "INVALID_ANONYMOUS_AUTH_CODE"
   | "SDK_UNAVAILABLE" // the official SDK module is missing or failed to load
   | "UNSUPPORTED" // the runtime/app version does not support the operation
   | "AD_NOT_LOADED" // show requested before a completed load
@@ -96,6 +97,12 @@ export type SdkLoginReferrer = "DEFAULT" | "SANDBOX";
 export interface SdkLoginResult {
   authorizationCode: string;
   referrer: SdkLoginReferrer;
+}
+
+/** Single-use code; exchange immediately on the server, never persist it. */
+export interface SdkAnonymousAuthCode {
+  code: string;
+  expiresIn: number;
 }
 
 /**
