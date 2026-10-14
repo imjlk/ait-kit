@@ -75,3 +75,33 @@ test("distinguishes transport aborts without exposing their reason", async () =>
   } } });
   expect(result).toEqual({ ok: false, error: "ABORTED" });
 });
+
+for (const mode of ["FORWARD", " forward "]) {
+  test(`uses shared mode normalization for ${mode}`, async () => {
+    const stub = transport({ resultType: "SUCCESS", success: { anonKey: "valid-key" } });
+    expect(await exchangeAnonAuthCode({ code: "test-code" }, { mode, ...stub })).toEqual({ ok: true, anonKey: "valid-key" });
+  });
+}
+
+for (const resultType of ["HTTP_TIMEOUT", "NETWORK_ERROR", "EXECUTION_FAIL", "INTERRUPTED", "INTERNAL_ERROR"]) {
+  test(`reports indeterminate ${resultType} without accepting contradictory success`, async () => {
+    const stub = transport({ resultType, success: { anonKey: "must-not-authenticate" } });
+    expect(await exchangeAnonAuthCode({ code: "test-code" }, { mode: "forward", ...stub })).toMatchObject({ ok: false, error: "UPSTREAM_UNAVAILABLE" });
+  });
+}
+
+for (const resultType of [undefined, 12, "UNKNOWN", null, ["HTTP_TIMEOUT"]]) {
+  test(`reports invalid envelope type ${resultType}`, async () => {
+    const stub = transport({ resultType, success: { anonKey: "must-not-authenticate" } });
+    expect(await exchangeAnonAuthCode({ code: "test-code" }, { mode: "forward", ...stub })).toMatchObject({ ok: false, error: "INVALID_RESPONSE" });
+  });
+}
+
+test("separates provider rate limits and HTTP outages from invalid auth codes", async () => {
+  for (const stub of [transport({ resultType: "FAIL", error: { errorCode: "4095" } }), transport({}, 429), transport({}, 503)]) {
+    expect(await exchangeAnonAuthCode({ code: "test-code" }, { mode: "forward", ...stub })).toMatchObject({ ok: false, error: "UPSTREAM_UNAVAILABLE" });
+    expect(stub.calls).toHaveLength(1);
+  }
+  const rejected = transport({ resultType: "FAIL", error: { errorCode: "4011" } });
+  expect(await exchangeAnonAuthCode({ code: "test-code" }, { mode: "forward", ...rejected })).toMatchObject({ ok: false, error: "EXCHANGE_REJECTED" });
+});

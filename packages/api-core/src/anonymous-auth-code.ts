@@ -20,7 +20,8 @@ export async function exchangeAnonAuthCode(
   if (!input || typeof input.code !== "string" || !input.code.trim() || input.code.length > 4096) {
     return { ok: false, error: "INVALID_AUTH_CODE" };
   }
-  if (options.mode !== "forward") return { ok: false, error: "FORWARD_MODE_REQUIRED" };
+  const normalized = normalizeCoreOptions(options);
+  if (normalized.mode !== "forward") return { ok: false, error: "FORWARD_MODE_REQUIRED" };
   let response;
   try {
     options.signal?.throwIfAborted();
@@ -29,7 +30,7 @@ export async function exchangeAnonAuthCode(
       path: TOSS_ENDPOINTS.anonAuthCodeExchange,
       body: { code: input.code },
       ...(options.signal ? { signal: options.signal } : {})
-    }, normalizeCoreOptions(options));
+    }, normalized);
     options.signal?.throwIfAborted();
   } catch (error) {
     if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
@@ -37,13 +38,24 @@ export async function exchangeAnonAuthCode(
     }
     return { ok: false, error: "UPSTREAM_UNAVAILABLE" };
   }
+  if (response.status === 429 || response.status >= 500) {
+    return { ok: false, error: "UPSTREAM_UNAVAILABLE", upstreamStatus: response.status };
+  }
   if (response.status < 200 || response.status >= 300) {
     return { ok: false, error: "EXCHANGE_REJECTED", upstreamStatus: response.status };
   }
   const body = response.body;
   if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false, error: "INVALID_RESPONSE" };
   const envelope = body as Record<string, unknown>;
-  if (envelope.resultType !== "SUCCESS") return { ok: false, error: "EXCHANGE_REJECTED", upstreamStatus: response.status };
+  if (envelope.resultType === "FAIL") {
+    const error = envelope.error;
+    const code = error && typeof error === "object" ? (error as Record<string, unknown>).errorCode : undefined;
+    return { ok: false, error: code === "4095" ? "UPSTREAM_UNAVAILABLE" : "EXCHANGE_REJECTED", upstreamStatus: response.status };
+  }
+  if (typeof envelope.resultType === "string" && ["HTTP_TIMEOUT", "NETWORK_ERROR", "EXECUTION_FAIL", "INTERRUPTED", "INTERNAL_ERROR"].includes(envelope.resultType)) {
+    return { ok: false, error: "UPSTREAM_UNAVAILABLE", upstreamStatus: response.status };
+  }
+  if (envelope.resultType !== "SUCCESS") return { ok: false, error: "INVALID_RESPONSE", upstreamStatus: response.status };
   const success = envelope.success;
   if (!success || typeof success !== "object" || Array.isArray(success)) return { ok: false, error: "INVALID_RESPONSE" };
   const anonKey = (success as Record<string, unknown>).anonKey;
