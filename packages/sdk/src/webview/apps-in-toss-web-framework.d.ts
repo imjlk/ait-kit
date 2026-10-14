@@ -25,6 +25,8 @@ declare module "@apps-in-toss/web-framework" {
     login: () => Promise<{ authorizationCode: string; referrer: "DEFAULT" | "SANDBOX" }>;
   };
   export const User: {
+    /** Optional on older peers; available starting with SDK 3.6.0. */
+    createAnonymousKeyAuthCode?: (() => Promise<{ code: string; expiresIn: number }>) & { isSupported?: () => boolean };
     getAnonymousKey: (() => Promise<{ type: "HASH"; hash: string }>) & {
       isSupported?: () => boolean;
     };

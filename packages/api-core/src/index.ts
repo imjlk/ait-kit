@@ -25,6 +25,7 @@ export * from "./recipient.js";
 export * from "./login.js";
 export * from "./iap.js";
 export * from "./anon-key.js";
+export * from "./anonymous-auth-code.js";
 export * from "./promotion.js";
 export * from "./smart-message.js";
 export * from "./raw.js";
