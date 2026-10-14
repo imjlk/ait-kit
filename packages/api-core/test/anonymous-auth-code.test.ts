@@ -58,7 +58,7 @@ test("does not retry single-use codes or expose transport secrets", async () => 
 test("honors cancellation before dispatch and after transport completion", async () => {
   const aborted = new AbortController(); aborted.abort();
   const stub = transport({});
-  await exchangeAnonAuthCode({ code: "test-code" }, { mode: "forward", ...stub, signal: aborted.signal });
+  expect(await exchangeAnonAuthCode({ code: "test-code" }, { mode: "forward", ...stub, signal: aborted.signal })).toEqual({ ok: false, error: "ABORTED" });
   expect(stub.calls).toHaveLength(0);
   const controller = new AbortController();
   const result = await exchangeAnonAuthCode({ code: "test-code" }, { mode: "forward", signal: controller.signal, mtlsClient: { async request(_url, init) {
@@ -66,5 +66,12 @@ test("honors cancellation before dispatch and after transport completion", async
     controller.abort();
     return Response.json({ resultType: "SUCCESS", success: { anonKey: "late-identity" } });
   } } });
-  expect(result.ok).toBe(false);
+  expect(result).toEqual({ ok: false, error: "ABORTED" });
+});
+
+test("distinguishes transport aborts without exposing their reason", async () => {
+  const result = await exchangeAnonAuthCode({ code: "test-code" }, { mode: "forward", mtlsClient: { async request() {
+    throw new DOMException("private-code", "AbortError");
+  } } });
+  expect(result).toEqual({ ok: false, error: "ABORTED" });
 });

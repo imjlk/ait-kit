@@ -6,7 +6,7 @@ export interface AnonymousAuthCodeInput { code: string; }
 export interface AnonymousAuthCodeOptions extends AppsInTossCoreOptions { signal?: AbortSignal; }
 export type AnonymousAuthCodeResult =
   | { ok: true; anonKey: string }
-  | { ok: false; error: "INVALID_AUTH_CODE" | "FORWARD_MODE_REQUIRED" | "UPSTREAM_UNAVAILABLE" | "EXCHANGE_REJECTED" | "INVALID_RESPONSE"; upstreamStatus?: number };
+  | { ok: false; error: "ABORTED" | "INVALID_AUTH_CODE" | "FORWARD_MODE_REQUIRED" | "UPSTREAM_UNAVAILABLE" | "EXCHANGE_REJECTED" | "INVALID_RESPONSE"; upstreamStatus?: number };
 
 /**
  * Exchange a single-use SDK 3.6 auth code for an authenticated anonymous key.
@@ -31,7 +31,10 @@ export async function exchangeAnonAuthCode(
       ...(options.signal ? { signal: options.signal } : {})
     }, normalizeCoreOptions(options));
     options.signal?.throwIfAborted();
-  } catch {
+  } catch (error) {
+    if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+      return { ok: false, error: "ABORTED" };
+    }
     return { ok: false, error: "UPSTREAM_UNAVAILABLE" };
   }
   if (response.status < 200 || response.status >= 300) {

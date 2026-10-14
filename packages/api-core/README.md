@@ -250,6 +250,8 @@ application-controlled abort signal for the request deadline. Exchange immediate
 codes are single-use and expire after five minutes. The helper makes one request,
 never retries automatically, and never returns fabricated identities in stub mode.
 Failures contain fixed error categories rather than provider payloads or secrets.
+Cancellation returns `ABORTED`, distinct from `UPSTREAM_UNAVAILABLE`; neither
+result includes a transport exception or the caller-supplied abort reason.
 
 `verifyAnonKey` checks that a key exists; it does not authenticate the caller.
 Authenticate with code exchange before issuing your own session. Order ownership,
