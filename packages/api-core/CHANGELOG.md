@@ -1,5 +1,11 @@
 # @ait-kit/api-core
 
+## 0.6.0 — 2026-10-15
+
+### Minor changes
+
+- [ee36aad](https://github.com/imjlk/ait-kit/commit/ee36aadd9f4f3cf70020984f46c0c10186764c34) Support SDK 3.6 single-use anonymous authentication codes: issue fresh codes through the WebView identity adapter and exchange them over mTLS on the server. Reject unsupported runtimes and invalid provider envelopes without falling back to client-supplied keys, fabricated stub identities, or automatic retries. — Thanks @imjlk!
+
 ## 0.5.1 — 2026-09-21
 
 ### Security
