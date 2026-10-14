@@ -1,5 +1,11 @@
 # @ait-kit/api-cloudflare-service
 
+## 0.6.0 — 2026-10-15
+
+### Patch changes
+
+- Updated dependencies: api-core@0.6.0
+
 ## 0.5.1 — 2026-09-21
 
 ### Patch changes
