@@ -103,6 +103,83 @@ describe("Cloudflare HTTP fallback", () => {
     await expect(response.json()).resolves.toEqual({ ok: true, valid: true });
   });
 
+  test("dispatches the authenticated anonymous auth code exchange route once", async () => {
+    const headers = new Headers({ "content-type": "application/json" });
+    headers.set("authorization", "Bearer expected-token");
+    const forwarded: unknown[] = [];
+    const response = await handleFetchFallback(
+      new Request("https://service.example/internal/apps-in-toss/anonymous-key/exchange", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ code: "one-time-code" })
+      }),
+      {
+        ...fakeRpc(),
+        async exchangeAnonAuthCode(body) {
+          forwarded.push(body);
+          return { ok: true, anonKey: "opaque-key" };
+        }
+      },
+      { bearerToken: "expected-token" }
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, anonKey: "opaque-key" });
+    expect(forwarded).toEqual([{ code: "one-time-code" }]);
+  });
+
+  test("returns exchange failures as results without retrying", async () => {
+    const headers = new Headers({ "content-type": "application/json" });
+    headers.set("authorization", "Bearer expected-token");
+    let calls = 0;
+    const response = await handleFetchFallback(
+      new Request("https://service.example/internal/apps-in-toss/anonymous-key/exchange", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ code: "one-time-code" })
+      }),
+      {
+        ...fakeRpc(),
+        async exchangeAnonAuthCode() {
+          calls += 1;
+          return { ok: false, error: "UPSTREAM_UNAVAILABLE", upstreamStatus: 503 };
+        }
+      },
+      { bearerToken: "expected-token" }
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: false, error: "UPSTREAM_UNAVAILABLE", upstreamStatus: 503 });
+    expect(calls).toBe(1);
+  });
+
+  test.each([
+    ["no bearer token is configured", undefined, undefined, 404],
+    ["the bearer token is wrong", "wrong-token", "expected-token", 401]
+  ] as const)("never reaches the exchange when %s", async (_label, provided, expected, status) => {
+    const headers = new Headers({ "content-type": "application/json" });
+    if (provided) headers.set("authorization", `Bearer ${provided}`);
+    let calls = 0;
+    const response = await handleFetchFallback(
+      new Request("https://service.example/internal/apps-in-toss/anonymous-key/exchange", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ code: "one-time-code" })
+      }),
+      {
+        ...fakeRpc(),
+        async exchangeAnonAuthCode() {
+          calls += 1;
+          return { ok: true, anonKey: "must-not-be-issued" };
+        }
+      },
+      { bearerToken: expected }
+    );
+
+    expect(response.status).toBe(status);
+    expect(calls).toBe(0);
+  });
+
   test("forwards the prepare recipient unchanged over the authenticated route", async () => {
     const headers = new Headers({ "content-type": "application/json" });
     headers.set("authorization", "Bearer expected-token");
@@ -175,6 +252,9 @@ function fakeRpc(
     },
     async verifyAnonKey() {
       return { ok: true, valid: true };
+    },
+    async exchangeAnonAuthCode() {
+      return { ok: true, anonKey: "opaque-key" };
     },
     async promotionRewardGrant() {
       return { ok: true, providerStatus: "GRANTED" };

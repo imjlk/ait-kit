@@ -1,6 +1,8 @@
 export type {
   AnonKeyVerifyInput,
   AnonKeyVerifyResponse,
+  AnonymousAuthCodeInput,
+  AnonymousAuthCodeResult,
   AppsInTossApiRpc,
   HealthResponse,
   IapOrderStatusInput,
@@ -36,6 +38,8 @@ export type {
 import type {
   AnonKeyVerifyInput,
   AnonKeyVerifyResponse,
+  AnonymousAuthCodeInput,
+  AnonymousAuthCodeResult,
   HealthResponse,
   IapOrderStatusInput,
   IapOrderStatusResponse,
@@ -67,6 +71,7 @@ export const PROXY_ENDPOINTS = Object.freeze({
   tossLoginRemoveByUserKey: "/internal/apps-in-toss/toss-login/remove-by-user-key",
   iapOrderStatus: "/internal/apps-in-toss/iap/order/status",
   anonKeyVerify: "/internal/apps-in-toss/users/anon-key/verify",
+  anonAuthCodeExchange: "/internal/apps-in-toss/anonymous-key/exchange",
   promotionRewardGrant: "/internal/apps-in-toss/promotion/reward/grant",
   promotionPrepareReward: "/internal/apps-in-toss/promotion/reward/prepare",
   promotionExecuteReward: "/internal/apps-in-toss/promotion/reward/execute",
@@ -90,7 +95,15 @@ export interface TossMtlsHttpClient {
   tossLoginComplete(body: TossLoginCompleteInput): Promise<TossLoginCompleteResponse>;
   tossLoginRemoveByUserKey(body: TossLoginRemoveByUserKeyInput): Promise<TossLoginRemoveByUserKeyResponse>;
   iapOrderStatus(body: IapOrderStatusInput): Promise<IapOrderStatusResponse>;
+  /** Checks that an anonymous key exists; does not authenticate the caller. */
   anonKeyVerify(body: AnonKeyVerifyInput): Promise<AnonKeyVerifyResponse>;
+  /**
+   * Exchanges a single-use SDK 3.6+ anonymous auth code for the caller's
+   * anonymous key — the call that authenticates an anonymous user. Sent once:
+   * the client never retries or caches it, and a timeout or HTTP error leaves
+   * the code's state unknown, so obtain a fresh code instead of resending.
+   */
+  anonAuthCodeExchange(body: AnonymousAuthCodeInput): Promise<AnonymousAuthCodeResult>;
   promotionRewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
   promotionPrepareReward(body: PromotionRewardPrepareInput): Promise<PromotionRewardPrepareResponse>;
   promotionExecuteReward(body: PromotionRewardExecuteInput): Promise<PromotionRewardExecuteResponse>;
@@ -183,6 +196,7 @@ export function createTossMtlsHttpClient(options: TossMtlsHttpClientOptions): To
     tossLoginRemoveByUserKey: (body) => request("POST", PROXY_ENDPOINTS.tossLoginRemoveByUserKey, body),
     iapOrderStatus: (body) => request("POST", PROXY_ENDPOINTS.iapOrderStatus, body),
     anonKeyVerify: (body) => request("POST", PROXY_ENDPOINTS.anonKeyVerify, body),
+    anonAuthCodeExchange: (body) => request("POST", PROXY_ENDPOINTS.anonAuthCodeExchange, body),
     promotionRewardGrant: (body) => request("POST", PROXY_ENDPOINTS.promotionRewardGrant, body),
     promotionPrepareReward: (body) => request("POST", PROXY_ENDPOINTS.promotionPrepareReward, body),
     promotionExecuteReward: (body) => request("POST", PROXY_ENDPOINTS.promotionExecuteReward, body),

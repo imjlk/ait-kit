@@ -1,3 +1,5 @@
+import type { AnonymousAuthCodeInput, AnonymousAuthCodeResult } from "./anonymous-auth-code.js";
+
 export const DEFAULT_TOSS_API_BASE_URL = "https://apps-in-toss-api.toss.im";
 
 export const SMART_MESSAGE_BULK_MAX_CONTEXTS = 2_500;
@@ -515,7 +517,22 @@ export interface AppsInTossApi {
     orderStatus(body: IapOrderStatusInput): Promise<IapOrderStatusResponse>;
   };
   users: {
+    /**
+     * Checks that an anonymous key exists. It does not prove the caller owns
+     * the key, so it must not be used to authenticate a request; use
+     * `exchangeAnonAuthCode` for that.
+     */
     verifyAnonKey(body: AnonKeyVerifyInput): Promise<AnonKeyVerifyResponse>;
+    /**
+     * Exchanges a fresh, single-use SDK 3.6+ anonymous auth code for the
+     * caller's anonymous key, authenticating the caller. Makes exactly one
+     * upstream request: never retried, never cached, and never stubbed
+     * (stub mode returns `FORWARD_MODE_REQUIRED`).
+     */
+    exchangeAnonAuthCode(
+      body: AnonymousAuthCodeInput,
+      init?: { signal?: AbortSignal }
+    ): Promise<AnonymousAuthCodeResult>;
   };
   promotion: {
     rewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
@@ -536,7 +553,14 @@ export interface AppsInTossApiRpc {
   tossLoginComplete(body: TossLoginCompleteInput): Promise<TossLoginCompleteResponse>;
   tossLoginRemoveByUserKey(body: TossLoginRemoveByUserKeyInput): Promise<TossLoginRemoveByUserKeyResponse>;
   iapOrderStatus(body: IapOrderStatusInput): Promise<IapOrderStatusResponse>;
+  /** Checks that an anonymous key exists; does not authenticate the caller. */
   verifyAnonKey(body: AnonKeyVerifyInput): Promise<AnonKeyVerifyResponse>;
+  /**
+   * Exchanges a single-use SDK 3.6+ anonymous auth code for the caller's
+   * anonymous key. One upstream request, no retries, no caching, no stub
+   * identities.
+   */
+  exchangeAnonAuthCode(body: AnonymousAuthCodeInput): Promise<AnonymousAuthCodeResult>;
   promotionRewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse>;
   promotionPrepareReward(body: PromotionRewardPrepareInput): Promise<PromotionRewardPrepareResponse>;
   promotionExecuteReward(body: PromotionRewardExecuteInput): Promise<PromotionRewardExecuteResponse>;
