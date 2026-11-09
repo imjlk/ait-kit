@@ -1,4 +1,10 @@
-import { SdkError, type SdkAnonymousAuthCode, type SdkAnonymousKey, type SdkLoginResult } from "../index.js";
+import {
+  SdkError,
+  type SdkAnonymousAuthCode,
+  type SdkAnonymousKey,
+  type SdkAnonymousKeyLookupOptions,
+  type SdkLoginResult
+} from "../index.js";
 
 /**
  * Internal platform contract for the login/anonymous-identity adapters,
@@ -107,6 +113,65 @@ export async function runSdkGetAnonymousKey(
     );
   }
   return { type: "HASH", hash };
+}
+
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * Builds one adapter's anonymous key lookup. While a lookup (loader + SDK
+ * call) is pending, every new caller joins it instead of starting another —
+ * including callers arriving after an earlier caller's deadline elapsed — so
+ * a host that never answers holds at most one bridge call (and listener) per
+ * adapter. The shared call is dropped as soon as it settles, so the next
+ * lookup asks the SDK again; results are never cached.
+ *
+ * `timeoutMs` bounds only the waiting caller: it rejects with
+ * SdkError("TIMEOUT") and never cancels the shared call (the official
+ * bridges expose no cancellation).
+ */
+export function createSharedAnonymousKeyLookup(
+  load: () => Promise<IdentityPlatformSdk>
+): (options?: SdkAnonymousKeyLookupOptions) => Promise<SdkAnonymousKey> {
+  let inFlight: Promise<SdkAnonymousKey> | undefined;
+  const join = (): Promise<SdkAnonymousKey> => {
+    if (inFlight) return inFlight;
+    const call = (async () => runSdkGetAnonymousKey(await load()))();
+    inFlight = call;
+    // Registered before any caller's handler, so a caller continuing after
+    // settlement already starts a fresh lookup. Also marks the shared
+    // rejection handled when every caller has timed out.
+    const clear = () => {
+      if (inFlight === call) inFlight = undefined;
+    };
+    call.then(clear, clear);
+    return call;
+  };
+  return async (options) => {
+    const timeoutMs = options?.timeoutMs ?? 0;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_TIMEOUT_MS) {
+      throw new SdkError("INVALID_IDENTITY_INPUT", `timeoutMs must be an integer from 0 to ${MAX_TIMEOUT_MS}`);
+    }
+    const shared = join();
+    if (timeoutMs === 0) return shared;
+    return new Promise<SdkAnonymousKey>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new SdkError(
+          "TIMEOUT",
+          `anonymous key lookup did not settle within ${timeoutMs}ms; the SDK call is still pending and later lookups will join it`
+        ));
+      }, timeoutMs);
+      shared.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+  };
 }
 
 function describe(value: unknown): string {
