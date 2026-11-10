@@ -97,6 +97,7 @@ describe("@ait-kit/api-client", () => {
     await client.tossLoginRemoveByUserKey({});
     await client.iapOrderStatus({});
     await client.anonKeyVerify({ anonKey: "anon-hash" });
+    await client.anonAuthCodeExchange({ code: "one-time-code" });
     await client.promotionRewardGrant({});
     await client.promotionPrepareReward({ tossUserKey: "user-1" });
     await client.promotionExecuteReward({});
@@ -109,6 +110,7 @@ describe("@ait-kit/api-client", () => {
       PROXY_ENDPOINTS.tossLoginRemoveByUserKey,
       PROXY_ENDPOINTS.iapOrderStatus,
       PROXY_ENDPOINTS.anonKeyVerify,
+      PROXY_ENDPOINTS.anonAuthCodeExchange,
       PROXY_ENDPOINTS.promotionRewardGrant,
       PROXY_ENDPOINTS.promotionPrepareReward,
       PROXY_ENDPOINTS.promotionExecuteReward,
@@ -120,6 +122,97 @@ describe("@ait-kit/api-client", () => {
     // service forwards to api-core is exactly what the caller supplied.
     const prepareCall = calls.find((call) => call.url.endsWith(PROXY_ENDPOINTS.promotionPrepareReward));
     expect(JSON.parse(String(prepareCall?.body))).toEqual({ tossUserKey: "user-1" });
+  });
+
+  test("exchanges an anonymous auth code once on the proxy exchange route", async () => {
+    const calls: FetchCall[] = [];
+    const client = createTossMtlsHttpClient({
+      baseUrl: "http://proxy.local",
+      token: "secret",
+      fetch: fakeFetch(calls, { ok: true, anonKey: "opaque-key", mode: "forward" })
+    });
+
+    const result = await client.anonAuthCodeExchange({ code: "one-time-code" });
+
+    expect(PROXY_ENDPOINTS.anonAuthCodeExchange).toBe("/internal/apps-in-toss/anonymous-key/exchange");
+    // The proxy may annotate results (e.g. with its mode); the typed result is the core shape.
+    expect(result).toMatchObject({ ok: true, anonKey: "opaque-key" });
+    expect(calls).toEqual([
+      {
+        url: "http://proxy.local/internal/apps-in-toss/anonymous-key/exchange",
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          authorization: "Bearer secret",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ code: "one-time-code" })
+      }
+    ]);
+  });
+
+  test("returns exchange failures from the proxy without retrying", async () => {
+    const calls: FetchCall[] = [];
+    const client = createTossMtlsHttpClient({
+      baseUrl: "http://proxy.local",
+      fetch: fakeFetch(calls, { ok: false, error: "EXCHANGE_REJECTED", mode: "forward" })
+    });
+
+    await expect(client.anonAuthCodeExchange({ code: "one-time-code" })).resolves.toMatchObject({
+      ok: false,
+      error: "EXCHANGE_REJECTED"
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("never retries or caches a single-use exchange code", async () => {
+    let attempts = 0;
+    const failing = createTossMtlsHttpClient({
+      baseUrl: "http://proxy.local",
+      fetch: async () => {
+        attempts += 1;
+        return Response.json({ ok: false, error: "UPSTREAM_UNAVAILABLE" }, { status: 502 });
+      }
+    });
+    await expect(failing.anonAuthCodeExchange({ code: "one-time-code" })).rejects.toMatchObject({
+      name: "TossMtlsHttpClientError",
+      status: 502
+    });
+    expect(attempts).toBe(1);
+
+    const calls: FetchCall[] = [];
+    const client = createTossMtlsHttpClient({
+      baseUrl: "http://proxy.local",
+      fetch: fakeFetch(calls, { ok: true, anonKey: "opaque-key" })
+    });
+    await client.anonAuthCodeExchange({ code: "one-time-code" });
+    await client.anonAuthCodeExchange({ code: "one-time-code" });
+    // A repeat call is sent again (and the provider rejects a consumed code);
+    // the client never replays a cached identity.
+    expect(calls.map((call) => call.body)).toEqual([
+      JSON.stringify({ code: "one-time-code" }),
+      JSON.stringify({ code: "one-time-code" })
+    ]);
+  });
+
+  test("does not resend an exchange that timed out", async () => {
+    let attempts = 0;
+    const client = createTossMtlsHttpClient({
+      baseUrl: "http://proxy.local",
+      timeoutMs: 1,
+      fetch: async (_url, init = {}) =>
+        new Promise<Response>((_resolve, reject) => {
+          attempts += 1;
+          init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+            once: true
+          });
+        })
+    });
+
+    await expect(client.anonAuthCodeExchange({ code: "one-time-code" })).rejects.toBeInstanceOf(
+      TossMtlsHttpClientTimeoutError
+    );
+    expect(attempts).toBe(1);
   });
 
   test("throws on non-2xx proxy responses with parsed status and body", async () => {

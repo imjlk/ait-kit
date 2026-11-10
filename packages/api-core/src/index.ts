@@ -1,4 +1,5 @@
 import { verifyAnonKey } from "./anon-key.js";
+import { exchangeAnonAuthCode } from "./anonymous-auth-code.js";
 import { getIapOrderStatus } from "./iap.js";
 import { completeTossLogin, removeTossLoginByUserKey } from "./login.js";
 import { rawMtlsRequest } from "./mtls-client.js";
@@ -45,7 +46,10 @@ export function createAppsInTossApi(options: AppsInTossCoreOptions = {}): AppsIn
       orderStatus: (body) => getIapOrderStatus(body, coreOptions)
     },
     users: {
-      verifyAnonKey: (body) => verifyAnonKey(body, coreOptions)
+      verifyAnonKey: (body) => verifyAnonKey(body, coreOptions),
+      // Codes are single-use: one request per call, no retry, no memoization.
+      exchangeAnonAuthCode: (body, init) =>
+        exchangeAnonAuthCode(body, init?.signal ? { ...coreOptions, signal: init.signal } : coreOptions)
     },
     promotion: {
       rewardGrant: (body) => grantPromotionReward(body, coreOptions),
@@ -69,6 +73,7 @@ export function createAppsInTossApiRpc(api: AppsInTossApi): AppsInTossApiRpc {
     tossLoginRemoveByUserKey: (body) => api.login.removeByUserKey(body),
     iapOrderStatus: (body) => api.iap.orderStatus(body),
     verifyAnonKey: (body) => api.users.verifyAnonKey(body),
+    exchangeAnonAuthCode: (body) => api.users.exchangeAnonAuthCode(body),
     promotionRewardGrant: (body) => api.promotion.rewardGrant(body),
     promotionPrepareReward: (body) => api.promotion.prepareReward(body),
     promotionExecuteReward: (body) => api.promotion.executeReward(body),

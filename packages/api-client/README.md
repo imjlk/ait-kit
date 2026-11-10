@@ -24,6 +24,17 @@ const tossApi = createTossMtlsHttpClient({
 });
 ```
 
+#### Anonymous user authentication
+
+`tossApi.anonAuthCodeExchange({ code })` posts a fresh SDK 3.6+ anonymous auth
+code to `PROXY_ENDPOINTS.anonAuthCodeExchange`
+(`/internal/apps-in-toss/anonymous-key/exchange`) and resolves to
+`{ ok: true, anonKey }` or `{ ok: false, error }`. This is the call that
+authenticates an anonymous user. `anonKeyVerify` only checks that a key exists
+and does not prove the caller owns it. Codes are single-use: the client sends
+each exchange once and never retries or caches it. After a timeout or a non-2xx
+response, ask the app for a new code.
+
 ### `/node`: mTLS transport for api-core
 
 ```ts
