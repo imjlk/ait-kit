@@ -2,6 +2,8 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type {
   AnonKeyVerifyInput,
   AnonKeyVerifyResponse,
+  AnonymousAuthCodeInput,
+  AnonymousAuthCodeResult,
   AppsInTossApiRpc,
   HealthResponse,
   IapOrderStatusInput,
@@ -61,6 +63,10 @@ export class AppsInTossApiService extends WorkerEntrypoint<AppsInTossServiceEnv>
 
   async verifyAnonKey(body: AnonKeyVerifyInput): Promise<AnonKeyVerifyResponse> {
     return this.rpc().verifyAnonKey(body);
+  }
+
+  async exchangeAnonAuthCode(body: AnonymousAuthCodeInput): Promise<AnonymousAuthCodeResult> {
+    return this.rpc().exchangeAnonAuthCode(body);
   }
 
   async promotionRewardGrant(body: PromotionRewardGrantInput): Promise<PromotionRewardGrantResponse> {

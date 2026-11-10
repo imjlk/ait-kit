@@ -11,9 +11,10 @@ npm install @ait-kit/sdk
 
 | Entry | Use it for |
 |---|---|
-| `@ait-kit/sdk` (root) | Runtime-neutral shared contracts: ad + IAP types, `SdkError`. Importable anywhere — plain Node, web, React Native — with no official SDK installed. |
-| `@ait-kit/sdk/rn` | React Native adapters (full-screen ads, IAP). Requires the official `@apps-in-toss/framework`, declared as an **optional peer** and imported lazily. Never requires the web SDK. |
-| `@ait-kit/sdk/webview` | WebView adapters for ads, banners, purchases, identity, storage, notifications, sharing, reviews, and promotions. Requires the official `@apps-in-toss/web-framework`, declared as an **optional peer** and imported lazily. Never requires the React Native SDK. |
+| `@ait-kit/sdk` (root) | Runtime-neutral shared contracts: result and input types for ads, IAP, login, anonymous identity and auth codes, storage, notification agreement, sharing, reviews, and promotions; `SdkError`; and the opt-in diagnostics observer (`createSdkDiagnostics`). Importable anywhere — plain Node, web, React Native — with no official SDK installed. |
+| `@ait-kit/sdk/webview` | WebView adapters: `createWebViewAds`, `createWebViewBannerAds`, `createWebViewIap`, `createWebViewIdentity` (login, anonymous key, and SDK 3.6+ anonymous auth codes), `createWebViewStorage`, `createWebViewNotification`, `createWebViewShare`, `createWebViewReview`, `createWebViewPromotion`. Requires the official `@apps-in-toss/web-framework`, declared as an **optional peer** and imported lazily. Never requires the React Native SDK. |
+| `@ait-kit/sdk/rn` | React Native adapters for existing RN mini apps: `createReactNativeAds`, `createReactNativeIap`, `createReactNativeIdentity` (login and anonymous key; no auth codes), `createReactNativeStorage`, `createReactNativeNotification`, `createReactNativeShare`, `createReactNativeReview`, `createReactNativePromotion`, plus `createDefaultFrameworkLoader`. Requires the official `@apps-in-toss/framework`, declared as an **optional peer** and imported lazily. Never requires the web SDK. |
+| `@ait-kit/sdk/web` | Deprecated alias of `/webview` (same module). Its `createWeb*` factories and `Web*` types are deprecated aliases of the `createWebView*` / `WebView*` names; see [WebView naming migration](#webview-naming-migration). |
 
 The two platform entries share one internal engine but keep completely
 separate SDK connections — in JavaScript and in the shipped type
@@ -107,13 +108,22 @@ SDK initialization never grants or completes pending orders by itself.
 
 Notification and sharing adapters ship in both entries (see below).
 
-## Login, anonymous identity, and storage (RN + WebView)
+## Login, anonymous identity, and storage (WebView + RN)
+
+`getAnonymousKey()` tells you which device account the mini app is running
+under. It does **not** authenticate a caller: the hash is a value the client
+reports, so any caller can send any hash, and your server must never treat
+it (or a server-side `verifyAnonKey` lookup of it) as proof of who made a
+request. To authenticate an anonymous user on your server, have the client
+request a fresh, single-use SDK 3.6+ auth code with
+`createAnonymousKeyAuthCode()` and exchange it on the server with
+`@ait-kit/api-core`'s `exchangeAnonAuthCode` before issuing your own session.
+See [Anonymous server authentication](#anonymous-server-authentication).
 
 ```ts
-import { createReactNativeIdentity, createReactNativeStorage } from "@ait-kit/sdk/rn";
-// or: import { createWebViewIdentity, createWebViewStorage } from "@ait-kit/sdk/webview";
+import { createWebViewIdentity, createWebViewStorage } from "@ait-kit/sdk/webview";
 
-const identity = createReactNativeIdentity();
+const identity = createWebViewIdentity();
 
 // 1. Login: the adapter validates and preserves authorizationCode/referrer.
 const login = await identity.login();
@@ -121,15 +131,42 @@ const login = await identity.login();
 //    (@ait-kit/api-core exposes the server-side endpoint) and create the
 //    application session there. The adapter never performs the exchange.
 
-// 2. Anonymous key: { type: "HASH", hash } or a typed error — never a
-//    fabricated key.
+// 2. Anonymous server authentication (official WebView SDK 3.6.0+): ask for
+//    a fresh single-use code and send it straight to YOUR server, which
+//    exchanges it with @ait-kit/api-core's exchangeAnonAuthCode and only
+//    then issues its own session. Never cache or store the code.
+const { code } = await identity.createAnonymousKeyAuthCode();
+const response = await fetch("/api/session/anonymous", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ code })
+});
+if (!response.ok) throw new Error(`session request failed: HTTP ${response.status}`);
+
+// 3. Anonymous key: { type: "HASH", hash } or a typed error — never a
+//    fabricated key. It identifies the device account (e.g. to notice an
+//    account switch on the client); it is not proof for a server.
 const anon = await identity.getAnonymousKey();
 
-// 3. Storage: string values, verbatim keys.
-const storage = createReactNativeStorage();
+// 4. Storage: string values, verbatim keys.
+const storage = createWebViewStorage();
 await storage.set("cart:items", "[]");
 const raw = await storage.get("cart:items"); // string | null
 await storage.remove("cart:items");
+```
+
+React Native (`@ait-kit/sdk/rn`) offers the same `login()`,
+`getAnonymousKey()` and storage contracts. Its identity adapter has no
+`createAnonymousKeyAuthCode()`, so the anonymous auth-code flow above is
+available only from `@ait-kit/sdk/webview`.
+
+```ts
+import { createReactNativeIdentity, createReactNativeStorage } from "@ait-kit/sdk/rn";
+
+const identity = createReactNativeIdentity();
+const login = await identity.login();
+const anon = await identity.getAnonymousKey(); // device account only, not server proof
+const storage = createReactNativeStorage();
 ```
 
 Contracts:
@@ -138,6 +175,10 @@ Contracts:
   one of the documented values) and preserved verbatim. Malformed results
   reject with `SdkError("INVALID_LOGIN_RESULT")`; unsupported environments
   with `UNSUPPORTED`; SDK rejections propagate unchanged.
+- **Anonymous auth codes** (`/webview` only, official SDK 3.6.0+) are
+  requested fresh on every call and never cached, stored, or replaced by a
+  login or a client-provided hash. Errors are listed under
+  [Anonymous server authentication](#anonymous-server-authentication).
 - **Anonymous key** results must be the documented `{ type: "HASH", hash }`
   shape. Anything else (including the official SDK's `"ERROR"` sentinel)
   rejects with `SdkError("INVALID_ANONYMOUS_KEY")` — the adapter never

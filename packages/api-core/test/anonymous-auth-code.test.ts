@@ -1,5 +1,11 @@
-import { expect, test } from "bun:test";
-import { exchangeAnonAuthCode, type MtlsClient } from "../src";
+import { describe, expect, test } from "bun:test";
+import {
+  createAppsInTossApi,
+  createAppsInTossApiRpc,
+  createTossMtlsCore,
+  exchangeAnonAuthCode,
+  type MtlsClient
+} from "../src";
 
 function transport(body: unknown, status = 200) {
   const calls: { url: string; init: RequestInit }[] = [];
@@ -104,4 +110,69 @@ test("separates provider rate limits and HTTP outages from invalid auth codes", 
   }
   const rejected = transport({ resultType: "FAIL", error: { errorCode: "4011" } });
   expect(await exchangeAnonAuthCode({ code: "test-code" }, { mode: "forward", ...rejected })).toMatchObject({ ok: false, error: "EXCHANGE_REJECTED" });
+});
+
+describe("first-class exchange operation", () => {
+  test("is exposed on the API, the RPC surface, and the createTossMtlsCore alias", async () => {
+    for (const make of [
+      (mtlsClient: MtlsClient) => createAppsInTossApi({ mode: "forward", upstreamBaseUrl: "https://partner.example", mtlsClient }).users,
+      (mtlsClient: MtlsClient) => createAppsInTossApiRpc(createAppsInTossApi({ mode: "forward", upstreamBaseUrl: "https://partner.example", mtlsClient })),
+      (mtlsClient: MtlsClient) => createTossMtlsCore({ mode: "forward", upstreamBaseUrl: "https://partner.example", mtlsClient })
+    ]) {
+      const stub = transport({ resultType: "SUCCESS", success: { anonKey: "opaque-key" } });
+      expect(await make(stub.mtlsClient).exchangeAnonAuthCode({ code: "one-time-code" })).toEqual({ ok: true, anonKey: "opaque-key" });
+      expect(stub.calls).toHaveLength(1);
+      expect(stub.calls[0]?.url).toBe("https://partner.example/api-partner/v1/apps-in-toss/users/anon-key/exchange");
+      expect(stub.calls[0]?.init.method).toBe("POST");
+      expect(JSON.parse(String(stub.calls[0]?.init.body))).toEqual({ code: "one-time-code" });
+    }
+  });
+
+  test("never fabricates an identity in stub mode", async () => {
+    const stub = transport({ resultType: "SUCCESS", success: { anonKey: "must-not-authenticate" } });
+    const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub", mtlsClient: stub.mtlsClient }));
+    expect(await api.exchangeAnonAuthCode({ code: "test-code" })).toEqual({ ok: false, error: "FORWARD_MODE_REQUIRED" });
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  test("rejects invalid codes before any upstream request", async () => {
+    const stub = transport({});
+    const api = createTossMtlsCore({ mode: "forward", mtlsClient: stub.mtlsClient });
+    for (const body of [{ code: "" }, { code: "   " }, { code: "x".repeat(4097) }, {}, null]) {
+      expect(await api.exchangeAnonAuthCode(body as never)).toEqual({ ok: false, error: "INVALID_AUTH_CODE" });
+    }
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  test("does not retry a failed exchange", async () => {
+    const stub = transport({}, 503);
+    const api = createTossMtlsCore({ mode: "forward", mtlsClient: stub.mtlsClient });
+    expect(await api.exchangeAnonAuthCode({ code: "test-code" })).toEqual({ ok: false, error: "UPSTREAM_UNAVAILABLE", upstreamStatus: 503 });
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  test("does not cache a consumed code: a repeat call reaches the provider and is rejected", async () => {
+    const calls: string[] = [];
+    const consumed = new Set<string>();
+    const api = createTossMtlsCore({ mode: "forward", mtlsClient: { async request(_url, init) {
+      const { code } = JSON.parse(String(init.body)) as { code: string };
+      calls.push(code);
+      if (consumed.has(code)) return Response.json({ resultType: "FAIL", error: { errorCode: "4011" } });
+      consumed.add(code);
+      return Response.json({ resultType: "SUCCESS", success: { anonKey: "opaque-key" } });
+    } } });
+
+    expect(await api.exchangeAnonAuthCode({ code: "one-time-code" })).toEqual({ ok: true, anonKey: "opaque-key" });
+    expect(await api.exchangeAnonAuthCode({ code: "one-time-code" })).toEqual({ ok: false, error: "EXCHANGE_REJECTED", upstreamStatus: 200 });
+    expect(calls).toEqual(["one-time-code", "one-time-code"]);
+  });
+
+  test("passes a caller abort signal through the API surface", async () => {
+    const aborted = new AbortController();
+    aborted.abort();
+    const stub = transport({ resultType: "SUCCESS", success: { anonKey: "late-identity" } });
+    const api = createAppsInTossApi({ mode: "forward", mtlsClient: stub.mtlsClient });
+    expect(await api.users.exchangeAnonAuthCode({ code: "test-code" }, { signal: aborted.signal })).toEqual({ ok: false, error: "ABORTED" });
+    expect(stub.calls).toHaveLength(0);
+  });
 });

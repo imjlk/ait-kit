@@ -118,7 +118,11 @@ vocabulary round-trips; anything else is `UNKNOWN`).
 ## Anonymous keys and verification
 
 `verifyAnonKey` calls `POST /api-partner/v1/apps-in-toss/users/anon-key/verify`
-with the key in the `x-anon-key` header. Results are tri-state:
+with the key in the `x-anon-key` header. It tells you whether a key exists,
+not whether the caller owns it: never treat a successful verification as
+authentication. Authenticate anonymous users with
+[`exchangeAnonAuthCode`](#anonymous-user-authentication-sdk-36) instead.
+Results are tri-state:
 
 - `{ ok: true, valid: true }` / `{ ok: true, valid: false }` — definitive
   provider verdicts.
@@ -244,11 +248,27 @@ to a string cannot recover the original identifier.
 
 ## Anonymous user authentication (SDK 3.6+)
 
-`exchangeAnonAuthCode({ code }, { mode: "forward", mtlsClient, signal })`
-exchanges a fresh SDK-issued code for `{ ok: true, anonKey }`. Use an
-application-controlled abort signal for the request deadline. Exchange immediately;
-codes are single-use and expire after five minutes. The helper makes one request,
-never retries automatically, and never returns fabricated identities in stub mode.
+Exchanging a fresh SDK-issued code for `{ ok: true, anonKey }` is a first-class
+operation on every server surface:
+
+| Surface | Call |
+|---|---|
+| `createAppsInTossApi(options)` | `api.users.exchangeAnonAuthCode({ code }, { signal })` |
+| `createAppsInTossApiRpc` / `createTossMtlsCore` | `rpc.exchangeAnonAuthCode({ code })` |
+| Standalone helper | `exchangeAnonAuthCode({ code }, { mode: "forward", mtlsClient, signal })` |
+| `@ait-kit/api-cloudflare-service` | Service Binding RPC `exchangeAnonAuthCode`, or authenticated `POST /internal/apps-in-toss/anonymous-key/exchange` |
+| `@ait-kit/api-client` | `client.anonAuthCodeExchange({ code })` (`PROXY_ENDPOINTS.anonAuthCodeExchange`) |
+
+All of them call `POST /api-partner/v1/apps-in-toss/users/anon-key/exchange`
+with `{ code }` and resolve to `{ ok: true, anonKey }` or `{ ok: false, error }`
+(`ABORTED`, `INVALID_AUTH_CODE`, `FORWARD_MODE_REQUIRED`, `UPSTREAM_UNAVAILABLE`,
+`EXCHANGE_REJECTED`, `INVALID_RESPONSE`). Stub mode returns
+`FORWARD_MODE_REQUIRED`; it never invents an identity.
+
+Use an application-controlled abort signal for the request deadline. Exchange immediately;
+codes are single-use and expire after five minutes. Each call makes one request:
+nothing retries automatically or caches a result, so a failed or timed-out
+exchange needs a fresh code from the client, not a resend of the old one.
 Failures contain fixed error categories rather than provider payloads or secrets.
 Cancellation returns `ABORTED`, distinct from `UPSTREAM_UNAVAILABLE`; neither
 result includes a transport exception or the caller-supplied abort reason.
