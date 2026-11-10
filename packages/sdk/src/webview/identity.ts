@@ -1,11 +1,18 @@
 import { resolvePlatformLoader } from "../platform-loader.js";
 import { createWebViewPlatformLoader } from "./platform-loader.js";
-import { SdkError, type SdkAnonymousAuthCode, type SdkAnonymousKey, type SdkLoginResult, type SdkStorage } from "../index.js";
+import {
+  SdkError,
+  type SdkAnonymousAuthCode,
+  type SdkAnonymousKey,
+  type SdkAnonymousKeyLookupOptions,
+  type SdkLoginResult,
+  type SdkStorage
+} from "../index.js";
 import {
   type IdentityPlatformLoader,
   type IdentityPlatformSdk,
+  createSharedAnonymousKeyLookup,
   runSdkCreateAnonymousKeyAuthCode,
-  runSdkGetAnonymousKey,
   runSdkLogin
 } from "../identity/platform-contract.js";
 import {
@@ -29,8 +36,13 @@ export interface WebViewIdentity {
   createAnonymousKeyAuthCode(): Promise<SdkAnonymousAuthCode>;
   /** Starts the platform login and validates/preserves the result. */
   login(): Promise<SdkLoginResult>;
-  /** Looks up the SDK-issued anonymous key; never fabricates one. */
-  getAnonymousKey(): Promise<SdkAnonymousKey>;
+  /**
+   * Looks up the SDK-issued anonymous key; never fabricates one. Concurrent
+   * lookups share one in-flight SDK call (never cached once settled);
+   * `timeoutMs` opts into a per-caller deadline that rejects with
+   * SdkError("TIMEOUT") without cancelling the shared call.
+   */
+  getAnonymousKey(options?: SdkAnonymousKeyLookupOptions): Promise<SdkAnonymousKey>;
 }
 
 export function createWebViewIdentity(options: WebViewIdentityOptions = {}): WebViewIdentity {
@@ -43,9 +55,10 @@ export function createWebViewIdentity(options: WebViewIdentityOptions = {}): Web
     return result.module;
   };
   return {
+    // Never shared: every call asks the SDK for a fresh single-use code.
     createAnonymousKeyAuthCode: async () => runSdkCreateAnonymousKeyAuthCode(await load()),
     login: async () => runSdkLogin(await load()),
-    getAnonymousKey: async () => runSdkGetAnonymousKey(await load())
+    getAnonymousKey: createSharedAnonymousKeyLookup(load)
   };
 }
 

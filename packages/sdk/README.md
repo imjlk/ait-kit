@@ -187,6 +187,17 @@ Contracts:
   the feature's minimum version, which rejects with
   `SdkError("UNSUPPORTED")` instead — an unsupported environment, not a
   malformed key.
+- **Anonymous key lookups are shared and can be bounded**: while one
+  `getAnonymousKey()` call is pending on an identity adapter, later calls
+  join it instead of starting another SDK call, so a host that never answers
+  holds at most one bridge call. Nothing is cached — once the call settles,
+  the next lookup asks the SDK again. Pass `getAnonymousKey({ timeoutMs })`
+  (integer milliseconds, `0` or omitted = no deadline, the default) to stop
+  waiting: the caller rejects with `SdkError("TIMEOUT")` (recorded as
+  `timeout` by `createSdkDiagnostics`), while the shared SDK call keeps
+  running and later lookups join it until it settles. Invalid values reject
+  with `SdkError("INVALID_IDENTITY_INPUT")`. `createAnonymousKeyAuthCode()`
+  is never shared: every call requests a fresh single-use code.
 - **Storage** keys and string values pass through byte-for-byte: no
   namespace prefixing, no key transformation. Compose namespaced keys
   yourself (e.g. `cart:items`). `get` resolves `null` for missing keys;

@@ -11,6 +11,6 @@ Only fixed operation labels, start/finish, a local sequence, duration and a coar
 
 The exported operation allowlist is frozen at runtime, including for JavaScript consumers. `durationMs` is omitted if either clock reading fails, is non-finite, moves backwards or produces a non-finite elapsed time. The original operation result or rejection is still preserved.
 
-`resolved` means the wrapped call resolved. A returned `{status: 'failed'}` is still `resolved`; inspect the unchanged SDK result to decide UI behavior. A fulfilled share or payment call is not proof of sharing, entitlement or a reward. The observer does not race calls with its own timer, cancel, retry or initiate SDK operations.
+`resolved` means the wrapped call resolved. A returned `{status: 'failed'}` is still `resolved`; inspect the unchanged SDK result to decide UI behavior. A fulfilled share or payment call is not proof of sharing, entitlement or a reward. The observer does not race calls with its own timer, cancel, retry or initiate SDK operations. Deadlines belong to the adapters: for example `identity.getAnonymousKey({ timeoutMs })` rejects with `SdkError("TIMEOUT")`, which is recorded as `timeout`.
 
 Use official WebView debug tools on an uploaded test bundle for Log/Network/Element inspection. Do not assume the same WebView inspector exists for React Native. RN may use a consumer-owned debug panel or an explicitly configured error sink. Keep source SHA, bundle hash and deployment ID in the app's release evidence, not in arbitrary per-call metadata.

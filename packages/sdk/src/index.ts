@@ -42,6 +42,8 @@ export type SdkErrorCode =
   | "INVALID_IAP_RESULT" // the SDK returned a malformed IAP query result
   | "INVALID_LOGIN_RESULT" // the SDK resolved a login result that failed validation
   | "INVALID_ANONYMOUS_KEY" // the SDK resolved an anonymous key that failed validation
+  | "INVALID_IDENTITY_INPUT" // malformed identity call options (e.g. timeoutMs)
+  | "TIMEOUT" // the caller's opt-in deadline elapsed; the underlying SDK call may still be pending
   | "INVALID_PROMOTION_INPUT" // malformed direct grant input or timeout
   | "PROMOTION_IN_PROGRESS" // this instance still has an unsettled direct grant
   | "INVALID_SHARE_PATH"; // a share link path was not an intoss:// deeplink
@@ -113,6 +115,21 @@ export interface SdkAnonymousAuthCode {
 export interface SdkAnonymousKey {
   type: "HASH";
   hash: string;
+}
+
+/**
+ * Per-call options for `getAnonymousKey`. Concurrent lookups on one identity
+ * adapter always share a single in-flight SDK call; `timeoutMs` only bounds
+ * how long THIS caller waits for it.
+ */
+export interface SdkAnonymousKeyLookupOptions {
+  /**
+   * Opt-in deadline in milliseconds (integer, 0–2147483647). When it elapses
+   * the call rejects with `SdkError("TIMEOUT")`, but the shared SDK call is
+   * not cancelled: later callers join it until it settles. Omitted or `0`
+   * means no deadline (the default).
+   */
+  timeoutMs?: number;
 }
 
 /** Minimal storage contract shared by the /rn and /webview adapters. */

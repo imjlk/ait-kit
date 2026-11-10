@@ -1,10 +1,10 @@
 import { resolvePlatformLoader } from "../platform-loader.js";
 import { createRnPlatformLoader } from "./platform-loader.js";
-import { SdkError, type SdkAnonymousKey, type SdkLoginResult } from "../index.js";
+import { SdkError, type SdkAnonymousKey, type SdkAnonymousKeyLookupOptions, type SdkLoginResult } from "../index.js";
 import {
   type IdentityPlatformLoader,
   type IdentityPlatformSdk,
-  runSdkGetAnonymousKey,
+  createSharedAnonymousKeyLookup,
   runSdkLogin
 } from "../identity/platform-contract.js";
 import { adaptOfficialRnIdentity } from "./official-module.js";
@@ -22,8 +22,13 @@ export interface ReactNativeIdentityOptions {
 export interface ReactNativeIdentity {
   /** Starts the platform login and validates/preserves the result. */
   login(): Promise<SdkLoginResult>;
-  /** Looks up the SDK-issued anonymous key; never fabricates one. */
-  getAnonymousKey(): Promise<SdkAnonymousKey>;
+  /**
+   * Looks up the SDK-issued anonymous key; never fabricates one. Concurrent
+   * lookups share one in-flight SDK call (never cached once settled);
+   * `timeoutMs` opts into a per-caller deadline that rejects with
+   * SdkError("TIMEOUT") without cancelling the shared call.
+   */
+  getAnonymousKey(options?: SdkAnonymousKeyLookupOptions): Promise<SdkAnonymousKey>;
 }
 
 export function createReactNativeIdentity(options: ReactNativeIdentityOptions = {}): ReactNativeIdentity {
@@ -37,7 +42,7 @@ export function createReactNativeIdentity(options: ReactNativeIdentityOptions = 
   };
   return {
     login: async () => runSdkLogin(await load()),
-    getAnonymousKey: async () => runSdkGetAnonymousKey(await load())
+    getAnonymousKey: createSharedAnonymousKeyLookup(load)
   };
 }
 
