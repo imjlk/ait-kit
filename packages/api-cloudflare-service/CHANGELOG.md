@@ -1,5 +1,21 @@
 # @ait-kit/api-cloudflare-service
 
+## 0.7.0 — 2026-11-10
+
+### Minor changes
+
+- [8f5bc6b](https://github.com/imjlk/ait-kit/commit/8f5bc6bccf64ab8f16934d234a3a7ccb9729d6b0) Make the SDK 3.6+ anonymous auth-code exchange a first-class server operation, so consumers no longer wire the standalone `exchangeAnonAuthCode` helper next to the core by hand.
+  
+  - `@ait-kit/api-core`: `createAppsInTossApi` exposes `users.exchangeAnonAuthCode({ code }, { signal })`, and `AppsInTossApiRpc` (`createAppsInTossApiRpc`, `createTossMtlsCore`) gains `exchangeAnonAuthCode({ code })`. Both reuse the existing helper: one upstream request per call, no retries, no caching, and `FORWARD_MODE_REQUIRED` instead of a stub identity in stub mode. Code that implements `AppsInTossApiRpc` itself (custom fakes or adapters) must add the method.
+  - `@ait-kit/api-client`: `PROXY_ENDPOINTS.anonAuthCodeExchange` (`/internal/apps-in-toss/anonymous-key/exchange`) and `TossMtlsHttpClient.anonAuthCodeExchange({ code })`, sent once and never retried.
+  - `@ait-kit/api-cloudflare-service`: `exchangeAnonAuthCode` Service Binding RPC method and the matching bearer-authenticated fetch fallback route.
+  
+  `verifyAnonKey` / `anonKeyVerify` only check that a key exists; they do not prove the caller owns it. Authenticate anonymous users with the exchange. — Thanks @imjlk!
+
+### Patch changes
+
+- Updated dependencies: api-core@0.7.0
+
 ## 0.6.0 — 2026-10-15
 
 ### Patch changes
