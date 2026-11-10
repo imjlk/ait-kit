@@ -225,6 +225,52 @@ describe("anonymous key lookup deadlines", () => {
     }
   });
 
+  test("timed-out retries against a silent host are released, and a fresh caller still gets the answer", async () => {
+    const bridge = controllableBridge();
+    const identity = createWebViewIdentity({ framework: bridge.platform });
+    const retries = 40;
+    let released = 0;
+    const registry = new FinalizationRegistry<number>(() => {
+      released++;
+    });
+
+    // Each retry gives up on its own deadline while the host never answers.
+    // Kept in a separate frame so no retry stays reachable from here.
+    await (async () => {
+      for (let attempt = 0; attempt < retries; attempt++) {
+        await identity.getAnonymousKey({ timeoutMs: 1 }).then(
+          () => { throw new Error("unexpected resolution"); },
+          (error: unknown) => {
+            expect(error).toMatchObject({ code: "TIMEOUT" });
+            registry.register(error as object, attempt);
+          }
+        );
+      }
+    })();
+    expect(bridge.calls).toHaveLength(1);
+
+    // A timed-out caller must not stay attached to the still-pending shared
+    // call: a waiter left on it would keep the caller's settled promise, and
+    // with it this TIMEOUT error, reachable for as long as the host is silent.
+    for (let round = 0; round < 20 && released < retries; round++) {
+      Bun.gc(true);
+      await sleep(5);
+    }
+    expect(released).toBeGreaterThanOrEqual(retries / 2);
+
+    const fresh = identity.getAnonymousKey({ timeoutMs: 1_000 });
+    await flush();
+    expect(bridge.calls).toHaveLength(1);
+    bridge.calls[0]!.resolve({ type: "HASH", hash: "late-hash" });
+    expect(await fresh).toEqual({ type: "HASH", hash: "late-hash" });
+
+    const next = identity.getAnonymousKey();
+    await flush();
+    expect(bridge.calls).toHaveLength(2);
+    bridge.calls[1]!.resolve({ type: "HASH", hash: "next-hash" });
+    expect(await next).toEqual({ type: "HASH", hash: "next-hash" });
+  });
+
   test("diagnostics classify a lookup deadline as a timeout", async () => {
     const bridge = controllableBridge();
     const identity = createWebViewIdentity({ framework: bridge.platform });

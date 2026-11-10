@@ -127,51 +127,72 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
  *
  * `timeoutMs` bounds only the waiting caller: it rejects with
  * SdkError("TIMEOUT") and never cancels the shared call (the official
- * bridges expose no cancellation).
+ * bridges expose no cancellation). Deadline-bound callers wait in a
+ * removable set rather than attaching handlers to the shared call, so a
+ * caller that gave up holds nothing on a call that may never settle.
  */
 export function createSharedAnonymousKeyLookup(
   load: () => Promise<IdentityPlatformSdk>
 ): (options?: SdkAnonymousKeyLookupOptions) => Promise<SdkAnonymousKey> {
-  let inFlight: Promise<SdkAnonymousKey> | undefined;
-  const join = (): Promise<SdkAnonymousKey> => {
+  let inFlight: SharedAnonymousKeyLookup | undefined;
+  const join = (): SharedAnonymousKeyLookup => {
     if (inFlight) return inFlight;
-    const call = (async () => runSdkGetAnonymousKey(await load()))();
-    inFlight = call;
-    // Registered before any caller's handler, so a caller continuing after
-    // settlement already starts a fresh lookup. Also marks the shared
-    // rejection handled when every caller has timed out.
-    const clear = () => {
-      if (inFlight === call) inFlight = undefined;
+    const waiters = new Set<DeadlineWaiter>();
+    const promise = (async () => runSdkGetAnonymousKey(await load()))();
+    const lookup: SharedAnonymousKeyLookup = { promise, waiters };
+    inFlight = lookup;
+    // The only handlers this adapter attaches to the shared call. Releasing
+    // it before settling waiters means a caller continuing after settlement
+    // starts a fresh lookup; the rejection handler also keeps a shared
+    // rejection handled when every waiter has already timed out.
+    const settle = (finish: (waiter: DeadlineWaiter) => void) => {
+      if (inFlight === lookup) inFlight = undefined;
+      for (const waiter of waiters) {
+        clearTimeout(waiter.timer);
+        finish(waiter);
+      }
+      waiters.clear();
     };
-    call.then(clear, clear);
-    return call;
+    promise.then(
+      (value) => settle((waiter) => waiter.resolve(value)),
+      (error: unknown) => settle((waiter) => waiter.reject(error))
+    );
+    return lookup;
   };
   return async (options) => {
     const timeoutMs = options?.timeoutMs ?? 0;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_TIMEOUT_MS) {
       throw new SdkError("INVALID_IDENTITY_INPUT", `timeoutMs must be an integer from 0 to ${MAX_TIMEOUT_MS}`);
     }
-    const shared = join();
-    if (timeoutMs === 0) return shared;
+    const { promise, waiters } = join();
+    if (timeoutMs === 0) return promise;
     return new Promise<SdkAnonymousKey>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new SdkError(
-          "TIMEOUT",
-          `anonymous key lookup did not settle within ${timeoutMs}ms; the SDK call is still pending and later lookups will join it`
-        ));
-      }, timeoutMs);
-      shared.then(
-        (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        (error: unknown) => {
-          clearTimeout(timer);
-          reject(error);
-        }
-      );
+      const waiter: DeadlineWaiter = {
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          waiters.delete(waiter);
+          reject(new SdkError(
+            "TIMEOUT",
+            `anonymous key lookup did not settle within ${timeoutMs}ms; the SDK call is still pending and later lookups will join it`
+          ));
+        }, timeoutMs)
+      };
+      waiters.add(waiter);
     });
   };
+}
+
+interface SharedAnonymousKeyLookup {
+  promise: Promise<SdkAnonymousKey>;
+  /** Deadline-bound callers still waiting; each removes itself on timeout. */
+  waiters: Set<DeadlineWaiter>;
+}
+
+interface DeadlineWaiter {
+  resolve: (value: SdkAnonymousKey) => void;
+  reject: (error: unknown) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 function describe(value: unknown): string {
