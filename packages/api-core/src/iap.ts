@@ -1,11 +1,14 @@
-import { requestToss } from "./mtls-client.js";
+import { requestToss, type TossMtlsRequest } from "./mtls-client.js";
+import { redactRecipientFailureReason, type MessageRecipient } from "./recipient.js";
 import {
   debugLog,
   httpStatusOk,
   iapOrderStatusMaxAttempts,
   iapOrderStatusRetryDelayMs,
   objectOrSelf,
+  readPathValue,
   readStrictStringState,
+  type StrictReadState,
   stringOrUndefined,
   upstreamFailureCode,
   upstreamFailureReason
@@ -16,6 +19,7 @@ import {
   type IapOrderStatusResponse,
   type IapOrderUnverifiedResponse,
   type IapOrderVerifiedResponse,
+  type IapPurchaserCheckStatus,
   type IapVerificationCode,
   type NormalizedAppsInTossCoreOptions
 } from "./types.js";
@@ -59,9 +63,12 @@ export async function getIapOrderStatus(
 
   const request = objectOrSelf(body, {});
   const orderId = stringOrUndefined(request.orderId);
-  const tossUserKey = stringOrUndefined(request.tossUserKey);
   if (!orderId) {
     return { ok: false, error: "MISSING_ORDER_ID", providerStatus: "ERROR" };
+  }
+  const purchaser = readIapPurchaser(request);
+  if (purchaser.state === "invalid") {
+    return invalidPurchaserResponse(orderId, purchaser.reason);
   }
   const maxAttempts = iapOrderStatusMaxAttempts(options);
   const retryDelayMs = iapOrderStatusRetryDelayMs(options);
@@ -72,11 +79,14 @@ export async function getIapOrderStatus(
         method: "POST",
         path: TOSS_ENDPOINTS.iapOrderStatus,
         body: { orderId },
-        tossUserKey
+        ...purchaserRequestFields(purchaser)
       },
       options
     );
-    normalized = normalizeIapOrderStatusResponse(request, upstream.body, upstream.status);
+    normalized = redactPurchaserFailure(
+      normalizeIapOrderStatusResponse(request, upstream.body, upstream.status),
+      purchaser
+    );
     if (!isRetryableIapOrderStatus(normalized) || attempt >= maxAttempts) {
       return attempt > 1 && normalized.ok ? { ...normalized, attempts: attempt } : normalized;
     }
@@ -224,6 +234,20 @@ export function normalizeIapOrderStatusResponse(
       return invalidIapResponse(request, `success payload carried a ${name} that was not a string`, upstreamStatus);
     }
   }
+  // purchaserMatched is optional too (omitted without a purchaser header or
+  // for an undetermined status), but a present non-boolean is tampered-looking.
+  const purchaserMatched = readStrictBooleanState(order, [
+    "purchaserMatched",
+    "success.purchaserMatched",
+    "data.purchaserMatched"
+  ]);
+  if (purchaserMatched.state === "invalid") {
+    return invalidIapResponse(request, "success payload carried a purchaserMatched that was not a boolean", upstreamStatus);
+  }
+  // A verdict only means something for the purchaser this request named; a
+  // stray value on an unscoped query is not evidence about anyone.
+  const purchaserCheck =
+    readIapPurchaser(request).state === "present" ? purchaserCheckFor(purchaserMatched) : undefined;
   const providerSku = optionalEvidence[0][1].state === "present" ? optionalEvidence[0][1].value : undefined;
   const statusDeterminedAt =
     optionalEvidence[1][1].state === "present" ? optionalEvidence[1][1].value : undefined;
@@ -262,6 +286,7 @@ export function normalizeIapOrderStatusResponse(
     if (providerSku !== undefined) response.sku = providerSku;
     const check = skuCheck(providerSku, expectedSku);
     if (check) response.skuCheck = check;
+    if (purchaserCheck) response.purchaserCheck = purchaserCheck;
     return response;
   }
 
@@ -275,6 +300,7 @@ export function normalizeIapOrderStatusResponse(
   if (providerSku !== undefined) response.sku = providerSku;
   const check = skuCheck(providerSku, expectedSku);
   if (check) response.skuCheck = check;
+  if (purchaserCheck) response.purchaserCheck = purchaserCheck;
   return response;
 }
 
@@ -334,6 +360,10 @@ function stubIapOrderStatus(body: IapOrderStatusInput): IapOrderStatusResponse {
   if (!orderId) {
     return { ok: false, error: "MISSING_ORDER_ID", providerStatus: "ERROR" };
   }
+  const purchaser = readIapPurchaser(request);
+  if (purchaser.state === "invalid") {
+    return invalidPurchaserResponse(orderId, purchaser.reason);
+  }
   // Synthetic development data: never verified, so an omitted mode setting can
   // never turn fabricated orders into grantable ones. Development flows that
   // want to exercise grant logic must opt in by checking `stub: true`.
@@ -352,7 +382,63 @@ function stubIapOrderStatus(body: IapOrderStatusInput): IapOrderStatusResponse {
     response.sku = expectedSku;
     response.skuCheck = { status: "MATCHED", providerSku: expectedSku };
   }
+  if (purchaser.state === "present") {
+    response.purchaserCheck = { status: "MATCHED" };
+  }
   return response;
+}
+
+type IapPurchaser =
+  | { state: "absent" }
+  | { state: "present"; recipient: MessageRecipient }
+  | { state: "invalid"; reason: string };
+
+/**
+ * Reads the optional purchaser. `tossUserKey` keeps its existing lenient
+ * read; the newer `anonKey` must be a non-blank string and passes through
+ * byte-for-byte. Naming both is ambiguous and rejected, never resolved by
+ * picking one.
+ */
+function readIapPurchaser(request: Record<string, unknown>): IapPurchaser {
+  const tossUserKey = stringOrUndefined(request.tossUserKey);
+  if (request.anonKey === undefined || request.anonKey === null) {
+    return tossUserKey === undefined ? { state: "absent" } : { state: "present", recipient: { kind: "user", userKey: tossUserKey } };
+  }
+  if (typeof request.anonKey !== "string" || !request.anonKey.trim()) {
+    return { state: "invalid", reason: "anonKey must be a non-empty string" };
+  }
+  if (tossUserKey !== undefined) {
+    return { state: "invalid", reason: "supply at most one of tossUserKey or anonKey" };
+  }
+  return { state: "present", recipient: { kind: "anonymous", anonKey: request.anonKey } };
+}
+
+function purchaserRequestFields(purchaser: IapPurchaser): Pick<TossMtlsRequest, "tossUserKey" | "headers"> {
+  if (purchaser.state !== "present") return {};
+  return purchaser.recipient.kind === "user"
+    ? { tossUserKey: String(purchaser.recipient.userKey) }
+    : { headers: { "x-anon-key": purchaser.recipient.anonKey } };
+}
+
+function invalidPurchaserResponse(orderId: string, failureReason: string): IapOrderStatusResponse {
+  return { ok: false, orderId, error: "INVALID_PURCHASER", providerStatus: "ERROR", failureReason };
+}
+
+/** Provider failure prose may echo the purchaser header; never relay it. */
+function redactPurchaserFailure(result: IapOrderStatusResponse, purchaser: IapPurchaser): IapOrderStatusResponse {
+  if (result.ok || purchaser.state !== "present" || !result.failureReason) return result;
+  return { ...result, failureReason: redactRecipientFailureReason(result.failureReason, purchaser.recipient) };
+}
+
+function purchaserCheckFor(matched: StrictReadState<boolean>): { status: IapPurchaserCheckStatus } {
+  if (matched.state !== "present") return { status: "NOT_PROVIDED" };
+  return { status: matched.value ? "MATCHED" : "MISMATCHED" };
+}
+
+function readStrictBooleanState(value: unknown, paths: string[]): StrictReadState<boolean> {
+  const found = readPathValue(value, paths);
+  if (found === undefined || found === null) return { state: "absent" };
+  return typeof found === "boolean" ? { state: "present", value: found } : { state: "invalid" };
 }
 
 function readOrderValue(upstream: unknown) {

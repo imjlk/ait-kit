@@ -206,6 +206,132 @@ describe("@ait-kit/api-core", () => {
     );
   }
 
+  test("checks a Toss-login purchaser through x-toss-user-key", async () => {
+    let seenHeaders = new Headers();
+    let seenBody: unknown;
+    const api = forwardIapApi(async (_url, init) => {
+      seenHeaders = new Headers(init.headers);
+      seenBody = JSON.parse(String(init.body));
+      return Response.json({
+        resultType: "SUCCESS",
+        success: { orderId: "order-id", status: "PURCHASED", sku: "sku-1", purchaserMatched: true }
+      });
+    });
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", tossUserKey: "user-key" });
+
+    expect(response).toMatchObject({ ok: true, verified: true, purchaserCheck: { status: "MATCHED" } });
+    expect(seenHeaders.get("x-toss-user-key")).toBe("user-key");
+    expect(seenHeaders.get("x-anon-key")).toBeNull();
+    expect(seenBody).toEqual({ orderId: "order-id" });
+    expect(JSON.stringify(response)).not.toContain("user-key");
+  });
+
+  test("checks an anonymous purchaser through x-anon-key without changing verified", async () => {
+    let seenHeaders = new Headers();
+    const api = forwardIapApi(async (_url, init) => {
+      seenHeaders = new Headers(init.headers);
+      return Response.json({
+        resultType: "SUCCESS",
+        success: { orderId: "order-id", status: "PAYMENT_COMPLETED", sku: "sku-1", purchaserMatched: false }
+      });
+    });
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", anonKey: "anon-hash" });
+
+    expect(response).toMatchObject({ ok: true, verified: true, purchaserCheck: { status: "MISMATCHED" } });
+    expect(seenHeaders.get("x-anon-key")).toBe("anon-hash");
+    expect(seenHeaders.get("x-toss-user-key")).toBeNull();
+    expect(JSON.stringify(response)).not.toContain("anon-hash");
+  });
+
+  test("reports NOT_PROVIDED when the provider gives no purchaser verdict", async () => {
+    const api = forwardIapApi(async () =>
+      Response.json({ resultType: "SUCCESS", success: { orderId: "order-id", status: "MINIAPP_MISMATCH", reason: "other app" } })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", anonKey: "anon-hash" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      verified: false,
+      verificationCode: "MINIAPP_MISMATCH",
+      purchaserCheck: { status: "NOT_PROVIDED" }
+    });
+  });
+
+  test("omits purchaserCheck when the request named no purchaser", async () => {
+    const api = forwardIapApi(async () =>
+      Response.json({ resultType: "SUCCESS", success: { orderId: "order-id", status: "PURCHASED", purchaserMatched: true } })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id" });
+
+    expect(response).toMatchObject({ ok: true, verified: true });
+    expect(response).not.toHaveProperty("purchaserCheck");
+  });
+
+  test("rejects a non-boolean purchaserMatched as an invalid response", async () => {
+    const api = forwardIapApi(async () =>
+      Response.json({ resultType: "SUCCESS", success: { orderId: "order-id", status: "PURCHASED", purchaserMatched: "true" } })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", tossUserKey: "user-key" });
+
+    expect(response).toMatchObject({ ok: false, error: "INVALID_RESPONSE", providerStatus: "ERROR" });
+  });
+
+  test.each([
+    [{ tossUserKey: "user-key", anonKey: "anon-hash" }, "supply at most one of tossUserKey or anonKey"],
+    [{ anonKey: "   " }, "anonKey must be a non-empty string"],
+    [{ anonKey: 42 }, "anonKey must be a non-empty string"]
+  ])("rejects an ambiguous or malformed purchaser before calling upstream: %j", async (purchaser, reason) => {
+    let calls = 0;
+    const api = forwardIapApi(async () => {
+      calls += 1;
+      return Response.json({});
+    });
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", ...(purchaser as Record<string, unknown>) });
+
+    expect(response).toEqual({
+      ok: false,
+      orderId: "order-id",
+      error: "INVALID_PURCHASER",
+      providerStatus: "ERROR",
+      failureReason: reason
+    });
+    expect(calls).toBe(0);
+  });
+
+  test("redacts provider failure prose that echoes the purchaser", async () => {
+    const api = forwardIapApi(async () =>
+      Response.json({ resultType: "FAIL", error: { errorCode: "4010", reason: "unknown anon key anon-hash" } })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", anonKey: "anon-hash" });
+
+    expect(response).toMatchObject({ ok: false, providerStatus: "ERROR", failureReason: "[redacted]" });
+    expect(JSON.stringify(response)).not.toContain("anon-hash");
+  });
+
+  test("stub mode reports a matched purchaser only alongside stub evidence", async () => {
+    const api = createAppsInTossApiRpc(createAppsInTossApi({ mode: "stub" }));
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", anonKey: "anon-hash" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      verified: false,
+      verificationCode: "STUB_EVIDENCE",
+      stub: true,
+      purchaserCheck: { status: "MATCHED" }
+    });
+    await expect(
+      api.iapOrderStatus({ orderId: "order-id", anonKey: "anon-hash", tossUserKey: "user-key" })
+    ).resolves.toMatchObject({ ok: false, error: "INVALID_PURCHASER" });
+  });
+
   test("does not backfill the request SKU when the provider omits SKU evidence", async () => {
     const api = forwardIapApi(async () =>
       Response.json({

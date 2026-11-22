@@ -45,6 +45,16 @@ asked. Grant decisions must gate on `verified`, never on `ok`:
   in the official API, so a missing SKU never flips `verified`; there is no
   supplementary lookup endpoint, so incomplete evidence on a payable status
   can only be re-queried through this same call.
+- `purchaserCheck` — present when the caller passes a purchaser, either
+  `tossUserKey` or `anonKey` (at most one; naming both or a blank/non-string
+  `anonKey` fails with `error: "INVALID_PURCHASER"` before any upstream
+  call). The purchaser travels only in the official `x-toss-user-key` /
+  `x-anon-key` header and is never echoed back; provider failure prose that
+  repeats it is redacted. `MATCHED`/`MISMATCHED` mirror the provider's
+  `purchaserMatched`, and `NOT_PROVIDED` means no verdict (documented for
+  `MINIAPP_MISMATCH`, `NOT_FOUND`, and `ERROR`). A non-boolean
+  `purchaserMatched` is `INVALID_RESPONSE`. It never flips `verified`:
+  grants for the calling user must require `MATCHED` themselves.
 - `stub: true` — marks synthetic stub-mode output. Stub responses fabricate
   a `PAYMENT_COMPLETED` order for development but are never `verified`
   (`verificationCode: "STUB_EVIDENCE"`), so a deployment that accidentally
@@ -57,7 +67,11 @@ requested order ID; when your catalog expects a specific product, also
 require the SKU comparison before crediting:
 
 ```ts
-const result = await tossApi.iapOrderStatus({ orderId, sku: "SKU_100_COINS" });
+const result = await tossApi.iapOrderStatus({
+  orderId,
+  sku: "SKU_100_COINS",
+  anonKey: callerAnonKey // or tossUserKey; omit only when the order is not user-bound
+});
 if (!result.ok) {
   // The lookup itself failed (transport, provider error, INVALID_RESPONSE):
   // no grant decision can be made from this response.
@@ -66,8 +80,12 @@ if (!result.ok) {
 
 // verified: provider attests a payable status for THIS order.
 // skuCheck: the product evidence matches what the caller expects.
+// purchaserCheck: the provider says this caller bought the order.
 const grantable =
-  result.verified === true && !result.stub && result.skuCheck?.status === "MATCHED";
+  result.verified === true &&
+  !result.stub &&
+  result.skuCheck?.status === "MATCHED" &&
+  result.purchaserCheck?.status === "MATCHED";
 // NOT_PROVIDED means the provider omitted SKU evidence: the order is paid,
 // but which product it bought is unconfirmed — decide explicitly.
 ```

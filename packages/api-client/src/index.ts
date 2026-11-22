@@ -9,6 +9,7 @@ export type {
   IapOrderStatusResponse,
   IapOrderUnverifiedResponse,
   IapOrderVerifiedResponse,
+  IapPurchaserCheckStatus,
   IapSkuCheckStatus,
   IapVerificationCode,
   MessageRecipient,
