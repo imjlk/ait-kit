@@ -136,7 +136,17 @@ export type TossLoginRemoveByUserKeyResponse =
  */
 export interface IapOrderStatusInput {
   orderId?: string;
+  /**
+   * Optional purchaser to check, sent only as the official `x-toss-user-key`
+   * header. Supply at most one of `tossUserKey` or `anonKey`; the provider
+   * then answers `purchaserMatched` (see `IapOrderStatusResponse.purchaserCheck`).
+   */
   tossUserKey?: string;
+  /**
+   * Optional anonymous purchaser to check, sent byte-for-byte only as the
+   * official `x-anon-key` header. Mutually exclusive with `tossUserKey`.
+   */
+  anonKey?: string;
   /**
    * Expected product SKU, compared only against the provider-returned SKU
    * (see `IapOrderStatusResponse.skuCheck`). Never substitutes for missing
@@ -163,6 +173,14 @@ export type IapVerificationCode =
 /** Outcome of comparing the caller's expected SKU with provider evidence. */
 export type IapSkuCheckStatus = "MATCHED" | "MISMATCHED" | "NOT_PROVIDED";
 
+/**
+ * Provider verdict on whether the supplied user bought the order:
+ * `MATCHED`/`MISMATCHED` mirror `purchaserMatched: true/false`, and
+ * `NOT_PROVIDED` means the provider returned no verdict (documented for
+ * `MINIAPP_MISMATCH`, `NOT_FOUND`, and `ERROR`).
+ */
+export type IapPurchaserCheckStatus = "MATCHED" | "MISMATCHED" | "NOT_PROVIDED";
+
 /** Shared evidence fields for both verified and unverified query successes. */
 interface IapOrderStatusSuccess {
   /** The provider status query succeeded with a valid payload. */
@@ -188,6 +206,15 @@ interface IapOrderStatusSuccess {
   skuCheck?: {
     status: IapSkuCheckStatus;
     providerSku?: string;
+  };
+  /**
+   * Present exactly when the caller supplied `tossUserKey` or `anonKey`.
+   * It never changes `verified`: grants bound to the calling user must also
+   * require `purchaserCheck.status === "MATCHED"`. The user identifier is
+   * never echoed back.
+   */
+  purchaserCheck?: {
+    status: IapPurchaserCheckStatus;
   };
   /** Synthetic stub-mode output; never present in forward mode. */
   stub?: true;
