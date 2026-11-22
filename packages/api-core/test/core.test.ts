@@ -284,7 +284,8 @@ describe("@ait-kit/api-core", () => {
   test.each([
     [{ tossUserKey: "user-key", anonKey: "anon-hash" }, "supply at most one of tossUserKey or anonKey"],
     [{ anonKey: "   " }, "anonKey must be a non-empty string"],
-    [{ anonKey: 42 }, "anonKey must be a non-empty string"]
+    [{ anonKey: 42 }, "anonKey must be a non-empty string"],
+    [{ anonKey: null }, "anonKey must be a non-empty string"]
   ])("rejects an ambiguous or malformed purchaser before calling upstream: %j", async (purchaser, reason) => {
     let calls = 0;
     const api = forwardIapApi(async () => {
@@ -313,6 +314,39 @@ describe("@ait-kit/api-core", () => {
 
     expect(response).toMatchObject({ ok: false, providerStatus: "ERROR", failureReason: "[redacted]" });
     expect(JSON.stringify(response)).not.toContain("anon-hash");
+  });
+
+  test("redacts a success reason that echoes the purchaser without touching the verdict", async () => {
+    const api = forwardIapApi(async () =>
+      Response.json({
+        resultType: "SUCCESS",
+        success: { orderId: "order-id", status: "PURCHASED", sku: "sku-1", purchaserMatched: true, reason: "bought by anon-hash" }
+      })
+    );
+
+    const response = await api.iapOrderStatus({ orderId: "order-id", anonKey: "anon-hash" });
+
+    expect(response).toMatchObject({ ok: true, verified: true, reason: "[redacted]", purchaserCheck: { status: "MATCHED" } });
+    expect(JSON.stringify(response)).not.toContain("anon-hash");
+  });
+
+  test("judges the purchaser that was sent, not a later mutation of the input", async () => {
+    const input: Record<string, unknown> = { orderId: "order-id" };
+    let seenHeaders = new Headers();
+    const api = forwardIapApi(async (_url, init) => {
+      seenHeaders = new Headers(init.headers);
+      input.anonKey = "late-anon";
+      return Response.json({
+        resultType: "SUCCESS",
+        success: { orderId: "order-id", status: "PURCHASED", purchaserMatched: true }
+      });
+    });
+
+    const response = await api.iapOrderStatus(input as { orderId: string });
+
+    expect(seenHeaders.get("x-anon-key")).toBeNull();
+    expect(response).toMatchObject({ ok: true, verified: true });
+    expect(response).not.toHaveProperty("purchaserCheck");
   });
 
   test("stub mode reports a matched purchaser only alongside stub evidence", async () => {

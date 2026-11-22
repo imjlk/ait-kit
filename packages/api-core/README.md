@@ -49,8 +49,8 @@ asked. Grant decisions must gate on `verified`, never on `ok`:
   `tossUserKey` or `anonKey` (at most one; naming both or a blank/non-string
   `anonKey` fails with `error: "INVALID_PURCHASER"` before any upstream
   call). The purchaser travels only in the official `x-toss-user-key` /
-  `x-anon-key` header and is never echoed back; provider failure prose that
-  repeats it is redacted. `MATCHED`/`MISMATCHED` mirror the provider's
+  `x-anon-key` header and is never echoed back; provider text that repeats
+  it (`failureReason`, or `reason` on a success) is redacted. `MATCHED`/`MISMATCHED` mirror the provider's
   `purchaserMatched`, and `NOT_PROVIDED` means no verdict (documented for
   `MINIAPP_MISMATCH`, `NOT_FOUND`, and `ERROR`). A non-boolean
   `purchaserMatched` is `INVALID_RESPONSE`. It never flips `verified`:

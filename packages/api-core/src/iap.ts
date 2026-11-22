@@ -61,7 +61,10 @@ export async function getIapOrderStatus(
     return stubIapOrderStatus(body);
   }
 
-  const request = objectOrSelf(body, {});
+  // Snapshot the caller's object once: the orderId, SKU expectation, and
+  // purchaser sent upstream are exactly the ones normalization judges, even
+  // if the caller mutates its input while a lookup or retry is in flight.
+  const request = { ...objectOrSelf(body, {}) };
   const orderId = stringOrUndefined(request.orderId);
   if (!orderId) {
     return { ok: false, error: "MISSING_ORDER_ID", providerStatus: "ERROR" };
@@ -401,7 +404,9 @@ type IapPurchaser =
  */
 function readIapPurchaser(request: Record<string, unknown>): IapPurchaser {
   const tossUserKey = stringOrUndefined(request.tossUserKey);
-  if (request.anonKey === undefined || request.anonKey === null) {
+  // Only an omitted anonKey means "no anonymous purchaser"; an explicit null
+  // is a malformed purchaser, not a silent fallback to an unscoped lookup.
+  if (request.anonKey === undefined) {
     return tossUserKey === undefined ? { state: "absent" } : { state: "present", recipient: { kind: "user", userKey: tossUserKey } };
   }
   if (typeof request.anonKey !== "string" || !request.anonKey.trim()) {
@@ -424,10 +429,18 @@ function invalidPurchaserResponse(orderId: string, failureReason: string): IapOr
   return { ok: false, orderId, error: "INVALID_PURCHASER", providerStatus: "ERROR", failureReason };
 }
 
-/** Provider failure prose may echo the purchaser header; never relay it. */
+/**
+ * Provider prose may echo the purchaser header: scrub `failureReason` on
+ * failures and `reason` on successes. Verdict fields are never rewritten.
+ */
 function redactPurchaserFailure(result: IapOrderStatusResponse, purchaser: IapPurchaser): IapOrderStatusResponse {
-  if (result.ok || purchaser.state !== "present" || !result.failureReason) return result;
-  return { ...result, failureReason: redactRecipientFailureReason(result.failureReason, purchaser.recipient) };
+  if (purchaser.state !== "present") return result;
+  if (!result.ok) {
+    return result.failureReason
+      ? { ...result, failureReason: redactRecipientFailureReason(result.failureReason, purchaser.recipient) }
+      : result;
+  }
+  return result.reason ? { ...result, reason: redactRecipientFailureReason(result.reason, purchaser.recipient) } : result;
 }
 
 function purchaserCheckFor(matched: StrictReadState<boolean>): { status: IapPurchaserCheckStatus } {
